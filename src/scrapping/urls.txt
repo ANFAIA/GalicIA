@@ -1,0 +1,27 @@
+Archivos poesía:
+https://bvg.udc.es/index_interno.jsp
+
+https://datos-abertos.galiciana.gal/es/recurso?uri=http://biblioteca.galiciana.gal/aut/BDGA20100000526
+
+http://www.poesiagalega.org/
+
+https://www.cirp.gal/bdo.html o https://www.cirp.es/
+
+https://ilg.usc.gal/es/recursos
+
+https://literaturagalega.as-pg.gal/index.html->Movimientos y etapas
+
+https://corpus.cirp.es/
+
+https://www.cervantesvirtual.com/areas/bib-galegas/
+
+https://publicacions.academia.gal/index.php/rag/catalog/series/publicacions
+
+https://coleccionpoesiagalega.blogspot.com/
+
+https://cantigas.fcsh.unl.pt/listacantigas.asp
+
+
+ASR:
+Dataset asr:
+https://huggingface.co/collections/proxectonos/asr-datasets-6698db50bc2f8c7459357efa
