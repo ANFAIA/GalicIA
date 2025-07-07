@@ -1,4 +1,3 @@
-# 2) token_counter.py  ──> copia y pega este script
 import os
 from pathlib import Path
 import csv
