@@ -4,7 +4,7 @@ import csv
 import tiktoken
 
 # Cambia esta ruta por la raíz de tus archivos .txt
-ROOT = Path("./galiciana_data")
+ROOT = Path("./data")
 
 enc = tiktoken.get_encoding("cl100k_base")   # mismo modelo que usa GPT-4/3.5-turbo
 totales = 0
