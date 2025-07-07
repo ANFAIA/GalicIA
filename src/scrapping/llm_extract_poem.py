@@ -95,7 +95,7 @@ def save_poem(raw: str, base_dir: str = "./prueba") -> str:
     return file_path
 
 
-def save_poems(raw: str, base_dir: str = "./galiciana_data"):
+def save_poems(raw: str, base_dir: str = "./data"):
     """
     Divide la salida del modelo por la línea '---'
     y guarda cada poema individual con save_poem().
@@ -151,13 +151,13 @@ if __name__ == "__main__":
     #print(html_to_chat('https://bvg.udc.es/paxina.jsp?id_obra=ObCoIeII1&alias=Celso+Emilio&id_edicion=ObCoIeII1001&formato=texto&pagina=2&cabecera=%3Ca+href%3D%22ficha_obra.jsp%3Fid%3DObCoIeII1%26alias%3DCelso+Emilio%22+class%3D%22nombreObraPaxina%22%3EObras+Completas+I+e+II%3C%2Fa%3E&maxpagina=2&minpagina=1'))
 
     # ── Galiciana ───────────────────────────────────────────────────────────────
-    #'''
+    '''
     archivo = "galiciana/poemas_texto_links.jsonl"
     enlaces = extraer_urls(archivo)
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {executor.submit(process_url, url): url for url in enlaces}
-    #'''
+    '''
     # ── Otros ejemplos (descomenta el que necesites) ───────────────────────────
     """
     # WikiSource
@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
     # Colección Poesía Galega
     html_content = fetch_html_from_url("https://coleccionpoesiagalega.blogspot.com/")
-    urls_auth = extract_author_urls_from_html(html_content)
+    urls_auth = extract_author_urls_from_html(html_content) bbbbbbbbbbbbbbbbbb 
     for url_ath in urls_auth:
         html_label = fetch_html_from_url(url_ath)
         poemas_url = extract_poem_urls_from_html(html_label)
