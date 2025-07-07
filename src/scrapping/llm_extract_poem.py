@@ -24,14 +24,32 @@ Si el HTML contiene varios poemas, escribe **cada poema** con el formato:
 ```Título```
 ```Autor```
 
-y deja una línea que contenga solo tres guiones
+Ignora todo lo que no sea el propio poema como titulos, separadoes, tabuladores y fechas.
+El resultado del poema debe ser un texto como este:
+```
+Caminante que pasa pola estrada,
+Seguindo a dirección do interior,
+Cando vexas a cruz abandonada,
+Déixaa soa para durmir na soidade.
+
+Para que vale o cheiro a romeu?
+Que lle botas nos brazos ao pasar?
+Asustarás á multitude ruidosa
+Das bolboretas, que aterrarán alí.
+
+É da tumba dun humilde escravo,
+A súa vida foi o ronsel dun insomnio atroz.
+Déixao durmir no leito de verdor,
+Que o Señor de entre os montes compuxo para el.
+```
 ---
 entre un poema y el siguiente.
 
 Ejemplo (dos poemas):
 
 ```Verso 1
-Verso 2```
+Verso 2
+```
 ```Título A```
 ```Autor A```
 ---
@@ -39,6 +57,8 @@ Verso 2```
 Verso 2```
 ```Título B```
 ```Autor B```
+
+Sobre todo y lo mas importa es que respetes las lineas tal y como estan en el documento originalc
 """
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -89,7 +109,7 @@ def save_poems(raw: str, base_dir: str = "./galiciana_data"):
                 print(f"⚠ Bloque ignorado: {e}", flush=True)
 
 
-def html_to_chat(url: str, model: str = "gpt-4.1-mini", max_chars: int = 400_000):
+def html_to_chat(url: str, model: str = "o4-mini", max_chars: int = 400_000):
     """
     Descarga el HTML de `url`, lo trunca a `max_chars`
     y lo envía al endpoint /chat/completions junto con `prompt`.
@@ -113,7 +133,6 @@ def html_to_chat(url: str, model: str = "gpt-4.1-mini", max_chars: int = 400_000
                     ],
                 }
             ],
-            temperature=0.2,
         )
         return completion.choices[0].message.content
 
@@ -129,7 +148,7 @@ def process_url(url):
 
 if __name__ == "__main__":
 
-    #print(html_to_chat('https://bvg.udc.es/paxina.jsp?id_obra=14Na19-11&alias=Sebasti%E1n+Mart%EDnez-Risco&id_edicion=14Na19-11001&formato=texto&pagina=2&cabecera=%3Ca+href%3D%22ficha_obra.jsp%3Fid%3D14Na19-11%26alias%3DSebasti%E1n+Mart%EDnez-Risco%22+class%3D%22nombreObraPaxina%22%3E14+Nadali%F1as%3A+1958+-+1973%3C%2Fa%3E&maxpagina=2&minpagina=1'))
+    #print(html_to_chat('https://bvg.udc.es/paxina.jsp?id_obra=ObCoIeII1&alias=Celso+Emilio&id_edicion=ObCoIeII1001&formato=texto&pagina=2&cabecera=%3Ca+href%3D%22ficha_obra.jsp%3Fid%3DObCoIeII1%26alias%3DCelso+Emilio%22+class%3D%22nombreObraPaxina%22%3EObras+Completas+I+e+II%3C%2Fa%3E&maxpagina=2&minpagina=1'))
 
     # ── Galiciana ───────────────────────────────────────────────────────────────
     #'''
