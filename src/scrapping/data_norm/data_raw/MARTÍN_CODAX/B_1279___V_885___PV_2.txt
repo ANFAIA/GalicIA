@@ -1,0 +1,26 @@
+[MARTÍN_CODAX][Trovadorismo]
+[inicio]
+man_dad'hei co_mi_go
+ca ven meu a_mi_go:
+e i_rei, madr', a vi_go!
+
+co_mi_gu'hei man_da_do,
+ca ven meu a_ma_do:
+e i_rei, madr', a vi_go!
+
+ca ven meu a_mi_go
+e ven san'e vi_vo:
+e i_rei, madr', a vi_go!
+
+ca ven meu a_ma_do
+e ven viv'e sa_no:
+e i_rei, madr', a vi_go!
+
+ca ven san'e vi_vo
+e del-rei, a_mi_go:
+e i_rei, madr', a vi_go!
+
+ca ven viv'e sa_no
+e del-rei pri_va_do:
+e i_rei, madr', a vi_go!
+[fin]

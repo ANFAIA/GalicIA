@@ -1,0 +1,489 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Añade marcas [Nombre_de_carpeta][Movimiento] (línea 1),
+[inicio] (línea 2) y [fin] (última línea) a todos los .txt
+dentro de una jerarquía de carpetas cuyos nombres son autores.
+"""
+
+from pathlib import Path
+import argparse
+import sys
+
+# ───────────────────────── CONFIGURACIÓN ───────────────────────── #
+
+# 1) Diccionario por defecto — se usa si no existe ../autores_data.txt
+DEFAULT_AUTHOR_TO_MOVEMENT = {
+    "Celso_Emilio_Ferreiro": "Xeración do 36",
+    "Lois_Pereiro": "Xeración dos 80",
+    "Olga_Novo": "Xeración dos 90",
+    "Xosé_Mª_Díaz_Castro": "Xeración do 50",
+    "Pero_Mendes_da_Fonseca": "Trovadorismo",
+    "Estêvão_Faião": "Trovadorismo",
+    "Nuno_Fernandes_Torneol": "Trovadorismo",
+    "Diogo_Moniz": "Trovadorismo",
+    "Lopo": "Trovadorismo",
+    "Euxenio_Montes": "Ultraísmo",
+    "Fernão_Froiaz": "Trovadorismo",
+    "Pero_de_Berdia": "Trovadorismo",
+    "A__López_Casanova": "Xeración do 50",
+    "Lopo_Lias": "Trovadorismo",
+    "Nuno_Peres_Sandeu": "Trovadorismo",
+    "Manuel_Antonio": "Xeración Nós",
+    "Bonifaci_Calvo": "Trovadorismo",
+    "Rui_Martins_do_Casal": "Trovadorismo",
+    "Fernão_Fernandes_Cogominho": "Trovadorismo",
+    "Rui_Pais_de_Ribela": "Trovadorismo",
+    "Sancho_Sanches": "Trovadorismo",
+    "Osoiro_Anes": "Trovadorismo",
+    "Xela_Arias": "Xeración dos 80",
+    "João_Lopes_de_Ulhoa": "Trovadorismo",
+    "Fermín_Bouza_Brey": "Xeración Nós",
+    "Fernão_Garcia_Esgaravunha": "Trovadorismo",
+    "Airas_Peres_Vuitorom": "Trovadorismo",
+    "Vasco_Praga_de_Sandim": "Trovadorismo",
+    "Afonso_Lopes_de_Baião": "Trovadorismo",
+    "Juião_Bolseiro": "Trovadorismo",
+    "Estevão_Coelho": "Trovadorismo",
+    "Anónimo_ou_João_Peres_de_Aboim": "Trovadorismo",
+    "Uxío_Novoneyra": "Xeración do 50",
+    "João_Lobeira": "Trovadorismo",
+    "Arcadio_López_Casanova": "Xeración do 50",
+    "Gonçalo_Anes_do_Vinhal": "Trovadorismo",
+    "Bernardino_Graña": "Xeración do 50",
+    "Rui_Fernandes_de_Santiago": "Trovadorismo",
+    "Rui_Queimado": "Trovadorismo",
+    "Pero_Larouco": "Trovadorismo",
+    "Fernão_Pais_de_Tamalhancos": "Trovadorismo",
+    "Martim_Padrozelos": "Trovadorismo",
+    "Marta_Dacosta": "Xeración dos 90",
+    "Pero_Mafaldo": "Trovadorismo",
+    "Eduardo_Pondal": "Rexurdimento",
+    "João_Airas_de_Santiago": "Trovadorismo",
+    "João_Zorro": "Trovadorismo",
+    "Rui_Martins_de_Ulveira": "Trovadorismo",
+    "Pero_de_Ver": "Trovadorismo",
+    "Estêvão_da_Guarda": "Trovadorismo",
+    "Xohana_Torres": "Xeración do 50",
+    "Manuel_Luís_Acuña": "Descoñecido",
+    "Manuel_Rivas": "Xeración dos 80",
+    "Fermín_Bouza-Brey": "Xeración Nós",
+    "Ramón_Cabanillas": "Rexurdimento",
+    "Xoán_Manuel_Pintos": "Prerrexurdimento",
+    "Rodrigo_Anes_de_Alvares": "Trovadorismo",
+    "Álvaro_Cunqueiro": "Xeración do 36",
+    "João_de_Gaia": "Trovadorismo",
+    "João_Servando": "Trovadorismo",
+    "Martim_de_Ginzo": "Trovadorismo",
+    "Airas_Nunes": "Trovadorismo",
+    "Antonio_Noriega_Varela": "Rexurdimento",
+    "Luís_Pimentel": "Xeración Nós",
+    "Antón_Losada_Diéguez": "Xeración Nós",
+    "João_Garcia_de_Guilhade": "Trovadorismo",
+    "Amado_Carballo": "Xeración Nós",
+    "Estêvão_Travanca": "Trovadorismo",
+    "Afonso_X": "Trovadorismo",
+    "Martín_Codax": "Trovadorismo",
+    "Bernal_de_Bonaval": "Trovadorismo",
+    "Afonso_Mendes_de_Besteiros": "Trovadorismo",
+    "Sá_de_Miranda": "Renacemento / Humanismo",
+    "Manuel_Leiras_Pulpeiro": "Rexurdimento",
+    "Estêvão_Faião_ou_Anónimo": "Trovadorismo",
+    "Anónimo_4": "Descoñecido",
+    "D__Dinis": "Trovadorismo",
+    "Pero_da_Ponte": "Trovadorismo",
+    "María_do_Cebreiro": "Xeración dos 90",
+    "Xoán_Vicente_Viqueira": "Xeración Nós",
+    "Mem_Pais": "Trovadorismo",
+    "Eugenio_Carré_Aldao": "Xeración Nós",
+    "Vasco_Rodrigues_de_Calvelo": "Trovadorismo",
+    "Afonso_Anes_do_Cotom": "Trovadorismo",
+    "Pero_Garcia_Burgalês": "Trovadorismo",
+    "Curros_Enríquez": "Rexurdimento",
+    "Luís_Seoane": "Xeración do 36",
+    "Martim_Moxa": "Trovadorismo",
+    "Gil_Peres_Conde": "Trovadorismo",
+    "Chus_Pato": "Xeración dos 80",
+    "João_de_Requeixo": "Trovadorismo",
+    "Xosé_M__Álvarez_Blázquez": "Xeración do 36",
+    "Fernando_Esquio": "Trovadorismo",
+    "Airas_Carpancho": "Trovadorismo",
+    "Pilar_Pallarés": "Xeración dos 80",
+    "João_Vasques_de_Talaveira": "Trovadorismo",
+    "José_María_Posada": "Rexurdimento",
+    "Pero_Gomes_Barroso": "Trovadorismo",
+    "Aquilino_Iglesia_Alvariño": "Xeración do 36",
+    "Castro_Alves": "Romanticismo brasileiro",
+    "João_Soares_Somesso": "Trovadorismo",
+    "Rui_Gomes_de_Briteiros": "Trovadorismo",
+    "Martim_Soares": "Trovadorismo",
+    "Afonso_Anes_do_Cotom_ou_Airas_Engeitado": "Trovadorismo",
+    "Rompente": "Vangarda 1970s",
+    "João_Soares_Coelho": "Trovadorismo",
+    "Nuno_Anes_Cerzeo": "Trovadorismo",
+    "João_de_Cangas": "Trovadorismo",
+    "João_Mendes_de_Briteiros": "Trovadorismo",
+    "Manuel_María": "Xeración do 50",
+    "Paio_Soares_de_Taveirós_ou_Pero_da_Ponte": "Trovadorismo",
+    "Federico_García_Lorca": "Generación del 27",
+    "María_Xosé_Queizán": "Feminismo literario galego contemporáneo",
+    "Afonso_Sanches": "Trovadorismo",
+    "Afonso_Pais_de_Braga": "Trovadorismo",
+    "Mª_Xosé_Queizán": "Feminismo literario galego contemporáneo",
+    "Pedro_Amigo_de_Sevilha": "Trovadorismo",
+    "Paio_Soares_de_Taveirós": "Trovadorismo",
+    "Rosalía_de_Castro": "Rexurdimento",
+    "Joán_Zorro": "Trovadorismo",
+    "Vidal": "Trovadorismo",
+    "Méndez_Ferrín": "Xeración dos 80",
+    "Pero_de_Armea": "Trovadorismo",
+    "Garcia_Mendes_de_Eixo": "Trovadorismo",
+    "Anónimo": "Descoñecido",
+    "Pedro_Anes_Solaz": "Trovadorismo",
+    "Luz_Pozo_Garza": "Xeración do 50",
+    "Francisco_Añón_Paz": "Prerrexurdimento",
+    "Fernão_Gonçalves_de_Seabra": "Trovadorismo",
+    "Fernão_Rodrigues_de_Calheiros": "Trovadorismo",
+    "Paio_Gomes_Charinho": "Trovadorismo",
+        "FERNÁN_VELHO": "Trovadorismo",
+    "Airas_Núñez": "Trovadorismo",
+    "Eusebio_Lorenzo_Baleirón": "Xeración dos 80",
+    "Joán_de_Requeixo": "Trovadorismo",
+    "FERNÁN_FERNÁNDEZ_COGOMINHO": "Trovadorismo",
+    "Joán_de_Gaia": "Trovadorismo",
+    "Lorenzo_Varela": "Xeración do 36",
+    "Gregoria_de_Leborin": "Descoñecido",
+    "VASCO_GIL": "Trovadorismo",
+    "Fernán_García_Esgaravunha": "Trovadorismo",
+    "FERNÁN_DO_LAGO": "Trovadorismo",
+    "MARTÍN_MOXA": "Trovadorismo",
+    "NUNO_FERNÁNDEZ": "Trovadorismo",
+    "MARTÍN_PADROZELOS": "Trovadorismo",
+    "Ricardo_Carvalho_Calero": "Xeración do 36",
+    "CALDEIRÓN": "Descoñecido",
+    "JOÁN_VELHO_DE_PEDROGÁEZ": "Trovadorismo",
+    "GÓMEZ_GARCÍA": "Descoñecido",
+    "NUNO_EANES_CÉRZEO": "Trovadorismo",
+    "VASCO_GIL_e_PERO_MARTINZ": "Trovadorismo",
+    "Joán_Pérez_de_Avoín": "Trovadorismo",
+    "Pedro_de_Portugal__D___Conde_de_Barcelos": "Trovadorismo",
+    "JOÁN_SOÁREZ_COELHO": "Trovadorismo",
+    "Vidal__Judeu_de_Elvas": "Trovadorismo",
+    "ESTEVAN_TRAVANCA": "Trovadorismo",
+    "Manuel_Diz_Ramos": "Poesía contemporánea",
+    "REIMÓN_GONÇALVES": "Descoñecido",
+    "SANCHO_SÁNCHEZ": "Trovadorismo",
+    "VASCO_FERNÁNDEZ_PRAGA_DE_SANDÍN": "Trovadorismo",
+    "Men_Rodríguez_Tenoiro": "Trovadorismo",
+    "MENDINHO": "Trovadorismo",
+    "Osoiro_Anes": "Trovadorismo",
+    "Xela_Arias": "Xeración dos 80",
+    "Fran_Roura": "Descoñecido",
+    "JOÁN_NÚNEZ_CAMANEZ": "Trovadorismo",
+    "AFONSO_PÁEZ_DE_BRAGA": "Trovadorismo",
+    "AFONSO__ÁLVARO___GÓMEZ_DE_SARRIA": "Trovadorismo",
+    "Martín_Pérez_Alvín": "Descoñecido",
+    "Meendinho": "Trovadorismo",
+    "MARTÍN_SOÁREZ": "Trovadorismo",
+    "Ramón_Armada_Teixeiro": "Xeración do 36",
+    "JOÁN_SOÁREZ_COELHO_e_PICANDÓN": "Trovadorismo",
+    "LOPO_LÍAS": "Trovadorismo",
+    "Cesáreo_Sánchez": "Xeración dos 80",
+    "Eduardo_Estévez": "Xeración dos 90",
+    "JOÁN_AIRAS": "Trovadorismo",
+    "JOÁN_VÁSQUIZ_DE_TALAVEIRA": "Trovadorismo",
+    "Pero_de_Ambroa": "Trovadorismo",
+    "Jorge_Isaacs": "Romanticismo colombiano",
+    "Gonzalo_Navaza": "Xeración dos 80",
+    "Jesús_Rodríguez_López": "Poesía contemporánea",
+    "Vicente_Araguas": "Xeración dos 80",
+    "Fernán_Páez_de_Tamalancos": "Trovadorismo",
+    "Padre_Sarmiento": "Ilustración",
+    "Yolanda_Castaño": "Xeración dos 90",
+    "ROI_QUEIMADO": "Trovadorismo",
+    "Estevan_da_Guarda": "Trovadorismo",
+    "JUIÃO_BOLSEIRO_e_JOÁN_SOÁREZ_COELHO": "Trovadorismo",
+    "DIEGO_PEZELHO": "Trovadorismo",
+    "FERNÁN_FROIAZ": "Trovadorismo",
+    "BERNAL_DE_BONAVAL": "Trovadorismo",
+    "Cura_de_Fruíme": "Trovadorismo",
+    "Celso_Emilio": "Xeración do 36",
+    "JOÁN_SOÁREZ_DE_PAVIA": "Trovadorismo",
+    "Bernardino_Graña": "Xeración do 50",
+    "FERNÁN_PÁEZ_DE_TAMALANCOS": "Trovadorismo",
+    "JOÁN_SERVANDO": "Trovadorismo",
+    "Xosé_María_Álvarez_Blázquez": "Xeración do 36",
+    "Joán_Fernández_de_Ardeleiro": "Trovadorismo",
+    "M__Curros_Enríquez": "Rexurdimento",
+    "Martín_Moxa": "Trovadorismo",
+    "GALISTEU_FERNÁNDIZ": "Descoñecido",
+    "Pedro_Amigo_de_Sevilla": "Trovadorismo",
+    "Nuno_Fernández": "Trovadorismo",
+    "Xosé_Cornide": "Ilustración",
+    "AIRAS_PÉREZ_VUITORÓN": "Trovadorismo",
+    "Manuel_Curros_Enríquez": "Rexurdimento",
+    "Xoán_Babarro": "Poesía contemporánea",
+    "Ramón_Caride_Ogando": "Xeración dos 80",
+    "Marta_Dacosta": "Xeración dos 90",
+    "JOÁN_DE_CANGAS": "Trovadorismo",
+    "JOÁN_FERNÁNÉZ_DE_ARDELEIRO": "Trovadorismo",
+    "PERO_DE_ARMEA": "Trovadorismo",
+    "ROI_MARTINZ_DE_ULVEIRA": "Trovadorismo",
+    "JUIÃO_BOLSEIRO": "Trovadorismo",
+    "Xesús_Rodríguez_López": "Poesía contemporánea",
+    "Nuno_Rodrigues_de_Candarei": "Trovadorismo",
+    "Pai_Soárez_de_Taveirós": "Trovadorismo",
+    "Johán_Carballeira": "Xeración do 36",
+    "PERO_MEOGO": "Trovadorismo",
+    "Vasco_Gil": "Trovadorismo",
+    "Joán_García_de_Guilhade": "Trovadorismo",
+    "JOÁN_PÉREZ_DE_AVOÍN": "Trovadorismo",
+    "PAI_GÓMEZ_CHARINHO": "Trovadorismo",
+    "AFONSO_MÉNDEZ_DE_BESTEIROS": "Trovadorismo",
+    "JOÁN_ZORRO": "Trovadorismo",
+    "Alfonso_X": "Trovadorismo",
+    "FERNANDO_ESQUÍO": "Trovadorismo",
+    "GONÇALO_EANES_DO_VINHAL": "Trovadorismo",
+    "ARNALDO__Arnaut_Catalán___e_ALFONSO": "Trovadorismo",
+    "XELMIRIA": "Descoñecido",
+    "RUI_GÓMEZ__O_FREIRE": "Trovadorismo",
+    "AIRAS_CARPANCHO": "Trovadorismo",
+    "Francisco_Castro": "Poesía contemporánea",
+    "Gonzalo_Francisco_López_Abente": "Xeración Nós",
+    "Estíbaliz_Espinosa": "Xeración dos 90",
+    "Francisco_María_de_la_Iglesia": "Prerrexurdimento",
+    "Vasco_Pérez_Pardal": "Trovadorismo",
+    "MEN_VÁSQUEZ_DE_FOLHETE": "Trovadorismo",
+    "Pedro_Eanes_Solaz": "Trovadorismo",
+    "AFONSO_FERNÁNDEZ_CUBEL": "Trovadorismo",
+    "Salvador_García-Bodaño": "Xeración do 50",
+    "Xoán_Manuel_Pintos": "Prerrexurdimento",
+    "FERNÁN_RODRÍGUEZ_DE_CALHEIROS": "Trovadorismo",
+    "MEN_RODRÍGUEZ_DE_BRITEIROS": "Trovadorismo",
+    "Pae_Calvo": "Trovadorismo",
+    "AIRAS_PÁEZ": "Trovadorismo",
+    "Álvaro_Cunqueiro": "Xeración do 36",
+    "PERO_VELHO_DE_TAVEIRÓS_e_PAI_SOÁREZ_DE_TAVEIRÓS": "Trovadorismo",
+    "Pae_de_Cana": "Trovadorismo",
+    "Xavier_Rodríguez_Baixeras": "Xeración dos 80",
+    "María_Canosa": "Poesía contemporánea",
+    "JOÁN_BAVECA": "Trovadorismo",
+    "JOÁN_DE_GAIA": "Trovadorismo",
+    "Cantigas_de_amigo": "Trovadorismo",
+    "RODRIGO_EANES_REDONDO": "Trovadorismo",
+    "GOLPARRO": "Trovadorismo",
+    "VASCO_RODRIGUES_DE_CALVELO": "Trovadorismo",
+    "AFONSO_FERNÁNDEZ_CEBOLHILHA": "Trovadorismo",
+    "Uxío": "Descoñecido",
+    "RODRIGO_EANES_DE_ÁLVARES": "Trovadorismo",
+    "GARCÍA_SOÁREZ": "Trovadorismo",
+    "Derek_Walcott": "Poscolonialismo caribeño",
+    "Lino_Braxe": "Xeración dos 80",
+    "Luísa_Villalta": "Xeración dos 80",
+    "RODRIGO_EANES_DE_VASCONCELOS": "Trovadorismo",
+    "Joán_Núñez_Camanez": "Trovadorismo",
+    "Airas_Veaz": "Trovadorismo",
+    "mar_Allíc_Sírp": "Descoñecido",
+    "AFONSO_SÁNCHEZ": "Trovadorismo",
+    "Manuel_Leiras_Pulpeiro": "Rexurdimento",
+    "MEN_RODRÍGUIZ_TENOIRO": "Trovadorismo",
+    "FERNÁN_GONÇÁLVEZ_DE_SEAVRA": "Trovadorismo",
+    "AFONSO_LÓPEZ_DE_BAIÁN": "Trovadorismo",
+    "Joan_de_Cangas": "Trovadorismo",
+    "JOÁN_GARCÍA_DE_GUILHADE_e_LOURENÇO": "Trovadorismo",
+    "AFONSO_EANES_DO_COTÓN": "Trovadorismo",
+    "PERO_GÓMEZ_BARROSO": "Trovadorismo",
+    "ESTEVAN_REIMONDO": "Descoñecido",
+    "PERO_DA_PONTE": "Trovadorismo",
+    "M__V__BARROS_": "Descoñecido",
+    "Pero_da_Ponte": "Trovadorismo",
+    "MARTÍN_DE_CALDAS": "Trovadorismo",
+    "Amador_Montenegro": "Descoñecido",
+    "Afonso_Eiré": "Xeración dos 80",
+    "Nuno_Eánes_Cérzeo": "Trovadorismo",
+    "Alfonso_Rodríguez_Rodríguez": "Poesía contemporánea",
+    "Joán_Méndiz_de_Briteiros": "Trovadorismo",
+    "Xosé_María_Costa": "Poesía contemporánea",
+    "Francisco_Añón": "Prerrexurdimento",
+    "Antón_Avilés_de_Taramancos": "Xeración dos 80",
+    "Joán_López_de_Ulhoa": "Trovadorismo",
+    "Pura_Vázquez": "Xeración do 50",
+    "Vasco_Rodrigues_de_Calvelo": "Trovadorismo",
+    "MARTÍN_DE_GINZO": "Trovadorismo",
+    "Nuno_Treez": "Descoñecido",
+    "Arcebispo_Lago": "Descoñecido",
+    "Nuno_Fernández_de_Mirapeixe": "Trovadorismo",
+    "PERO_GARCÍA_BURGALÉS": "Trovadorismo",
+    "Manuel_Pereira_Valcárcel": "Poesía contemporánea",
+    "GIL_SÁNCHEZ": "Trovadorismo",
+    "Aureliano_Pereira": "Descoñecido",
+    "Nuno_Porco": "Trovadorismo",
+    "PERO_VIVIÁEZ": "Trovadorismo",
+    "José_Alberte_Corral_Iglesias": "Poesía contemporánea",
+    "LOURENÇO": "Descoñecido",
+    "NÚNEZ": "Descoñecido",
+    "Pilar_Pallarés": "Xeración dos 80",
+    "VASCO_PÉREZ_PARDAL": "Trovadorismo",
+    "Nuno_Pérez_Sandeu": "Trovadorismo",
+    "ESTEVAN_COELHO": "Trovadorismo",
+    "Martín_Padrozelos": "Trovadorismo",
+    "Miguel_Anxo_Mouriño": "Poesía contemporánea",
+    "Aquilino_Iglesia_Alvariño": "Xeración do 36",
+    "JOÁN_VÁSQUIZ_DE_TALAVEIRA_e_JOÁN_AIRAS": "Trovadorismo",
+    "Emma_Couceiro": "Poesía contemporánea",
+    "Estevan_Faián": "Trovadorismo",
+    "María_Lado": "Xeración dos 90",
+    "ROI_FERNÁNDEZ_DE_SANTIAGO": "Trovadorismo",
+    "GIL_PÉREZ_CONDE": "Trovadorismo",
+    "LOPO": "Trovadorismo",
+    "JOÁN_SOÁIREZ_SOMESSO": "Trovadorismo",
+    "AIRAS_ENGEITADO": "Trovadorismo",
+    "Fernán_Rodríguez_de_Calheiros": "Trovadorismo",
+    "MARTÍN_CODAX": "Trovadorismo",
+    "Pedro_de_Portugal__conde_de_Barcelos": "Trovadorismo",
+    "Martin_Codax": "Trovadorismo",
+    "MARTÍN_CAMPINA": "Trovadorismo",
+    "ESTEVAN_FERNÁNDIZ_DE_ELVAS": "Trovadorismo",
+    "PERO_MAFALDO": "Trovadorismo",
+    "FERNÁN_FIGUEIRA_DE_LEMOS": "Trovadorismo",
+    "AIRAS_MONIZ_DE_ASME": "Trovadorismo",
+    "Florencio_Delgado_Gurriarán": "Xeración do 36",
+    "Joán_García": "Descoñecido",
+    "Xosé_María_Díaz_Castro": "Xeración do 50",
+    "ROI_MARTINZ_DO_CASAL": "Trovadorismo",
+    "Estevan_Fernández_Barreto": "Descoñecido",
+    "MARTÍN_ANES_MARINHO": "Trovadorismo",
+    "ROI_GÓMEZ_DE_BRITEIROS": "Trovadorismo",
+    "PEDRO_AMIGO_DE_SEVILHA": "Trovadorismo",
+    "Marcial_Valladares": "Prerrexurdimento",
+    "Xosé_Vázquez_Pintor": "Xeración dos 80",
+    "DINÍS__Don": "Trovadorismo",
+    "Manuel_Álvarez_Torneiro": "Xeración do 50",
+    "ESTEVAN_DA_GUARDA": "Trovadorismo",
+    "Eva_Veiga": "Xeración dos 80",
+    "ROI_PÁEZ_DE_RIBELA": "Trovadorismo",
+    "ALFONSO_X": "Trovadorismo",
+    "JOÁN_DE_LEÓN": "Trovadorismo",
+    "Pedro_Amigo_de_Sevilha": "Trovadorismo",
+    "PERO_DE_AMBROA": "Trovadorismo",
+    "PERO_DA_PONTE_e_GARCÍA_MARTINZ": "Trovadorismo",
+    "PERO_MÉNDIZ_DA_FONSECA": "Trovadorismo",
+    "AIRAS_NÚNEZ": "Descoñecido",
+    "AFONSO_SOÁREZ_SARRAÇA": "Trovadorismo",
+    "Emma_Pedreira": "Xeración dos 90",
+    "Vítor_Vaqueiro": "Xeración dos 80",
+    "PERO_GOTÉRREZ": "Trovadorismo",
+    "Joán_Lobeira": "Trovadorismo",
+    "Valentín_Lamas_Carvajal": "Rexurdimento",
+    "Pai_Gómez_Charinho": "Trovadorismo",
+    "Joán_Romeu": "Trovadorismo",
+    "PERO_GARCÍA_BURGALÉS_e_ALFONSO": "Trovadorismo",
+    "Martín_Soárez": "Trovadorismo",
+    "ANÓNIMO": "Descoñecido",
+    "JOÁN_GARCÍA_DE_GUILHADE": "Trovadorismo",
+    "Antom_Fortes_Torres": "Xeración dos 80",
+    "Anónimo": "Descoñecido",
+    "PERO_LAROUCO": "Trovadorismo",
+    "Men_Rodríguez_de_Briteiros": "Trovadorismo",
+    "ANÓNIMO__Trobador_de_Santarén": "Trovadorismo",
+    "Lois_Diéguez": "Xeración dos 80",
+    "Vasco_Fernández_Praga_de_Sandín": "Trovadorismo"
+}
+
+# 2) Ruta del fichero opcional con el mapeo «autor|movimiento»
+MAPPING_PATH = Path(__file__).resolve().parent / ".." / "autores_data.txt"
+
+# ────────────────────────── FUNCIONES ─────────────────────────── #
+
+def load_mapping() -> dict[str, str]:
+    """
+    Devuelve un diccionario {autor: movimiento}.
+    Prioriza el fichero ../autores_data.txt (formato «autor|movimiento»);
+    usa el diccionario embebido como respaldo.
+    """
+    if MAPPING_PATH.is_file():
+        mapping: dict[str, str] = {}
+        with MAPPING_PATH.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Separador: primera barra vertical o tab encontrada
+                for sep in ("|", "\t"):
+                    if sep in line:
+                        autor, mov = map(str.strip, line.split(sep, 1))
+                        mapping[autor] = mov
+                        break
+        if mapping:
+            return mapping
+    return DEFAULT_AUTHOR_TO_MOVEMENT
+
+
+def decorate_file(
+    txt_path: Path,
+    author: str,
+    movement: str,
+    root: Path
+) -> None:
+    """
+    Inserta/actualiza las banderas en el archivo indicado.
+    Muestra el progreso con ruta relativa a *root* (siempre válida).
+    """
+    try:
+        original_lines = txt_path.read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError as e:
+        print(f"⚠️  {txt_path}: problema de codificación ({e}); se omite.",
+              file=sys.stderr)
+        return
+
+    # Construir nuevo contenido
+    new_lines: list[str] = [
+        f"[{author}][{movement}]",  # línea 1
+        "[inicio]"                  # línea 2
+    ]
+    new_lines.extend(original_lines)     # resto del documento
+
+    # Asegurar la marca final
+    if not original_lines or original_lines[-1] != "[fin]":
+        new_lines.append("[fin]")
+
+    txt_path.write_text("\n".join(new_lines), encoding="utf-8")
+    print(f"✔︎ Procesado: {txt_path.relative_to(root)}")
+
+
+def walk_and_decorate(root: Path) -> None:
+    """
+    Recorre recursivamente *root* en busca de archivos .txt
+    y aplica las marcas correspondientes.
+    """
+    root = root.resolve()  # normalizar
+    if not root.is_dir():
+        sys.exit(f"❌ La ruta {root} no es un directorio válido.")
+
+    mapping = load_mapping()
+
+    for txt_path in root.rglob("*.txt"):
+        author_folder = txt_path.parent.name
+        movement = mapping.get(author_folder, "Descoñecido")
+        decorate_file(txt_path, author_folder, movement, root)
+
+# ──────────────────────── PROGRAMA PRINCIPAL ─────────────────────── #
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=("Añade las banderas [autor][movimiento]/[inicio]/[fin] "
+                     "a cada .txt dentro de la estructura de carpetas.")
+    )
+    parser.add_argument(
+        "directorio_raiz",
+        type=Path,
+        help="Carpeta raíz que contiene las subcarpetas de autores."
+    )
+    args = parser.parse_args()
+
+    walk_and_decorate(args.directorio_raiz)
+
+
+if __name__ == "__main__":
+    main()

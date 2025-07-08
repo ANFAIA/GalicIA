@@ -1,0 +1,22 @@
+[João_Zorro][Trovadorismo]
+[inicio]
+el-rei de por_tu_ga_le
+bar_cas man_dou lav_ra_re,
+e lá i_rá nas bar_cas si_go,
+mia fil_ha, o voss'a_mi_go.
+
+el-rei por_tug_ue_e_se
+bar_cas man_dou fa_ze_re,
+e lá i_rá nas bar_cas si_go,
+mia fil_ha, o voss'a_mi_go.
+
+bar_cas man_dou lav_ra_re
+e no mar as dei_ta_re,
+e lá i_rá nas bar_cas si_go,
+mia fil_ha, o voss'a_mi_go.
+
+bar_cas man_dou fa_ze_re
+e no mar as me_te_re,
+e lá i_rá nas bar_cas si_go,
+mia fil_ha, o voss'a_mi_go.
+[fin]

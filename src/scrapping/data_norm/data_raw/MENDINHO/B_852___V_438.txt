@@ -1,0 +1,26 @@
+[MENDINHO][Trovadorismo]
+[inicio]
+se_dia-m'eu na er_mi_da de san si_mi_ón
+e cer_ca_ron-mi as on_das, que gran_des son.
+eu a_ten_dend'o meu a_mi_go. e ver_rá?
+
+es_tan_do na er_mi_da ant'o al_tar,
+cer_ca_ron-mi as on_das gran_des do mar.
+eu a_ten_dend'o meu a_mi_go. e ver_rá?
+
+e cer_ca_ron-mi as on_das, que gran_des son:
+non hei i bar_quei_ro, nen re_ma_dor.
+eu a_ten_dend'o meu a_mi_go. e ver_rá?
+
+e cer_ca_ron-mi as on_das do al_to mar:
+non hei i bar_quei_ro, nen sei re_mar.
+eu a_ten_dend'o meu a_mi_go. e ver_rá?
+
+non hei i bar_quei_ro, nen re_ma_dor:
+mor_re_rei eu fre_mo_sa no mar maior.
+eu a_ten_dend'o meu a_mi_go. e ver_rá?
+
+non hei i bar_quei_ro, nen sei re_mar:
+mor_re_rei fre_mo_sa no al_to mar.
+eu a_ten_dend'o meu a_mi_go. e ver_rá?
+[fin]

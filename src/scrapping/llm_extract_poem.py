@@ -84,7 +84,7 @@ def save_poem(raw: str, base_dir: str = "./prueba") -> str:
     poem, title, author = [b.strip() for b in blocks[:3]]
 
     dir_path = os.path.join(base_dir, _fs_name(author))
-    file_path = os.path.join(dir_path, f"{_fs_name(title)}.txt")
+    file_path = os.path.join(dir_path, f"{_fs_name(title)}1.txt")
 
     os.makedirs(dir_path, exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:

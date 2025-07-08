@@ -1,0 +1,18 @@
+[MARTÍN_CODAX][Trovadorismo]
+[inicio]
+quan_tas sa_be_des a_mar a_mi_go
+trei_des co_mig'a lo mar de vi_go
+e ban_har-nos-e_mos nas on_das.
+
+quan_tas sa_be_des a_mar a_ma_do
+trei_des co_mig'a lo mar le_va_do
+e ban_har-nos-e_mos nas on_das.
+
+trei_des co_mig'a lo mar de vi_go
+e ve_e_re_mo-lo meu a_mi_go
+e ban_har-nos-e_mos nas on_das.
+
+trei_des co_mig'a lo mar le_va_do
+e ve_e_re_mo-lo meu a_ma_do
+e ban_har-nos-e_mos nas on_das.
+[fin]

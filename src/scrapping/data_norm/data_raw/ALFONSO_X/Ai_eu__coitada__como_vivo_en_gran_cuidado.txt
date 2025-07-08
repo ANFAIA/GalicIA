@@ -1,0 +1,12 @@
+[ALFONSO_X][Trovadorismo]
+[inicio]
+ai eu, coi_ta_da, co_mo vi_vo en gran cui_da_do
+por meu a_mi_go, que hei a_lon_ga_do!
+mui_to me tar_da
+o meu a_mi_go na guar_da!
+
+ai eu, coi_ta_da, co_mo vi_vo en gran de_se_jo
+por meu a_mi_go, que tar_da e non ve_jo!
+mui_to me tar_da
+o meu a_mi_go na guar_da!
+[fin]

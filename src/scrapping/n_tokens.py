@@ -3,8 +3,8 @@ from pathlib import Path
 import csv
 import tiktoken
 
-# Cambia esta ruta por la raíz de tus archivos .txt
-ROOT = Path("./data")
+# Cambia esta ruta por la raíz de tus archivos 1.txt
+ROOT = Path("data_norm")
 
 enc = tiktoken.get_encoding("cl100k_base")   # mismo modelo que usa GPT-4/3.5-turbo
 totales = 0
