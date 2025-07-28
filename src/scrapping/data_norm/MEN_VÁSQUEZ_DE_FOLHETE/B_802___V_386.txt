@@ -1,5 +1,5 @@
-[MEN_VÁSQUEZ_DE_FOLHETE][Trovadorismo]
-[inicio]
+[men__vás_quez__de__fol_he_te][tro_va_do_ris_mo]
+[i_ni_cio]
 ai a_mi_ga, per bo_a fe,
 nun_ca cui_dei, des que na_cí,
 vi_ver tan_to co_mo vi_ví

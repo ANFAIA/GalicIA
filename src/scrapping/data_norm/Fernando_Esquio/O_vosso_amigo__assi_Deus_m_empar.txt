@@ -1,5 +1,5 @@
-[Fernando_Esquio][Trovadorismo]
-[inicio]
+[fer_nan_do__es_quio][tro_va_do_ris_mo]
+[i_ni_cio]
 o vos_so a_mi_go, as_si deus m'em_par,
 vi, a_mi_ga, de vós mui_to quei_xar,
 das gran_des coi_tas que lhe fos_tes dar
@@ -15,5 +15,4 @@ ca el mor_re e de vós nun_ca a_ten_de
 se_nom coi_tas que so_fre por en_de
 des que vos el vi_ra
 
-gran_des [...]
 [fin]

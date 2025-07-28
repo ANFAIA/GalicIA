@@ -1,5 +1,5 @@
-[Diogo_Moniz][Trovadorismo]
-[inicio]
+[dio_go__mo_niz][tro_va_do_ris_mo]
+[i_ni_cio]
 se sou_bés_se mia sen_hor com'a mi pla_ze_ria
 d'eu mor_rer, pois la nom hei, log' eu nom mor_re_ria;
 ca, pe_ro me bem nom quer, a_mor me mon_stra_ria,
@@ -8,5 +8,4 @@ quand'eu sa_bor hou_ves_se de mor_rer.
 
 e se lhi fos_sem di_zer com[o] eu es_to di_zia,
 lo_go sei que mia sen_hor por mim de_man_da_ria;
-[...]
 [fin]
