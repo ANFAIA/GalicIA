@@ -16,7 +16,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     full_finetuning=False,
 )
 
-tokenizer = get_chat_template(tokenizer, chat_template="chatml")
+#tokenizer = get_chat_template(tokenizer, chat_template="chatml")
 
 # 3) Convertir a texto con prompt de generación
 def formatting_prompts_func(examples):
@@ -88,5 +88,5 @@ stats = trainer.train()
 print(stats)
 
 # 8) Guardar modelo
-model.save_pretrained("galicIA/est")
-tokenizer.save_pretrained("galicIA/est")
+model.save_pretrained("galicIA-v1")
+tokenizer.save_pretrained("galicIA-v1")

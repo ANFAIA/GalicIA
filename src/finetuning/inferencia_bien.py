@@ -2,13 +2,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStream
 import threading
 
 # Carga de checkpoint y tokenizer/model
-checkpoint = "galicIA/est"
+checkpoint = "galicIA-v1"
 tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
 model     = AutoModelForCausalLM.from_pretrained(checkpoint, local_files_only=True)
 
 # Mensaje de entrada
 messages = [
-    {"role": "user", "content": "Xera un poema sobre un can e un gato"}
+    {"role": "user", "content": "Xera un poema sobre voar nun avión"}
 ]
 
 # Prepara los tensores con el template de chat
