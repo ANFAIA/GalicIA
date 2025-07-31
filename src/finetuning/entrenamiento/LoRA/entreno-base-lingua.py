@@ -22,30 +22,34 @@ model, tokenizer = FastLanguageModel.from_pretrained(
 # 3) Función de formateo genérica
 def formatting_prompts_func(examples):
     texts = []
-    # número de ejemplos en este batch
     n = len(examples[next(iter(examples))])
 
     for i in range(n):
-        # 1) Detección de tipo de dataset
+        # Sacamos cada campo con .get para no KeyError, y luego comprobamos que no sea None
+        passage       = examples.get("flores_passage", [None] * n)[i]
+        correct_num   = examples.get("correct_answer_num", [None] * n)[i]
+        mc1           = examples.get("mc_answer1", [None] * n)[i]
+        mc2           = examples.get("mc_answer2", [None] * n)[i]
+        mc3           = examples.get("mc_answer3", [None] * n)[i]
+        mc4           = examples.get("mc_answer4", [None] * n)[i]
 
-        # --- Reading comprehension (ds1) ---
-        if (
-                "flores_passage" in examples
-                and all(f"mc_answer{j}" in examples for j in range(1, 5))
-                and "correct_answer_num" in examples
-        ):
-            passage = examples["flores_passage"][i]
-            q = examples["question"][i]
-            # recoge las 4 opciones
-            opciones = [examples[f"mc_answer{j}"][i] for j in range(1, 5)]
-            # índice (cadena) a entero para elegir la respuesta correcta
-            idx_corr = int(examples["correct_answer_num"][i]) - 1
+        sentence      = examples.get("sentence", [None] * n)[i]
+        label         = examples.get("label", [None] * n)[i]
+
+        question      = examples.get("question", [None] * n)[i]
+        answer        = examples.get("answer",   [None] * n)[i]
+
+        # 1) Detectar tipo de registro y montar prompt
+        if passage is not None and correct_num is not None and None not in (mc1, mc2, mc3, mc4):
+            # Reading comprehension
+            idx_corr = int(correct_num) - 1
+            opciones = [mc1, mc2, mc3, mc4]
 
             prompt = (
                 "### Instrucción:\n"
                 "Lee el siguiente pasaje y responde la pregunta eligiendo la opción correcta:\n\n"
                 f"{passage}\n\n"
-                f"Pregunta: {q}\n\n"
+                f"Pregunta: {question}\n\n"
                 "Opciones:\n"
                 f"1) {opciones[0]}\n"
                 f"2) {opciones[1]}\n"
@@ -55,40 +59,35 @@ def formatting_prompts_func(examples):
                 f"{opciones[idx_corr]}"
             )
 
-        # --- Linguistic acceptability (ds2) ---
-        elif "sentence" in examples and "label" in examples:
-            s = examples["sentence"][i]
-            lbl = "Aceptable" if examples["label"][i] == 1 else "No aceptable"
-
+        elif sentence is not None and label is not None:
+            # Linguistic acceptability
+            resp = "Aceptable" if label == 1 else "No aceptable"
             prompt = (
                 "### Instrucción:\n"
                 "¿Es esta oración gramaticalmente aceptable en gallego?\n"
-                f"\"{s}\"\n\n"
+                f"\"{sentence}\"\n\n"
                 "### Respuesta:\n"
-                f"{lbl}"
+                f"{resp}"
             )
 
-        # --- Math QA (ds3) ---
-        elif "question" in examples and "answer" in examples:
-            q = examples["question"][i]
-            a = examples["answer"][i]
-
+        elif question is not None and answer is not None:
+            # Math QA
             prompt = (
                 "### Instrucción:\n"
                 "Responde a la siguiente pregunta:\n"
-                f"{q}\n\n"
+                f"{question}\n\n"
                 "### Respuesta:\n"
-                f"{a}"
+                f"{answer}"
             )
 
-        # --- Fallback genérico ---
         else:
+            # Fallback genérico (por si hay algún otro formato)
             prompt = str({k: examples[k][i] for k in examples})
 
-        # 2) Envuelve en lista de mensajes
+        # 2) Envolver en lista de mensajes
         convo = [{"role": "user", "content": prompt}]
 
-        # 3) Aplica plantilla de chat
+        # 3) Aplicar plantilla de chat
         texts.append(
             tokenizer.apply_chat_template(
                 convo,
@@ -99,6 +98,7 @@ def formatting_prompts_func(examples):
         )
 
     return {"text": texts}
+
 
 # 4) Mapear y generar campo "text"
 ds_formatted = raw_ds.map(formatting_prompts_func, batched=True, remove_columns=raw_ds.column_names)
