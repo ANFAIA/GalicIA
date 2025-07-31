@@ -212,6 +212,6 @@ if __name__ == '__main__':
         exit(1)
 
     print("\n=== POEMA FINAL ===\n", poem)
-    with open('poema.txt', 'w', encoding='utf-8') as f:
+    with open('../poema.txt', 'w', encoding='utf-8') as f:
         f.write(poem)
     print("\n[✓] Poema guardado en 'poema.txt'")

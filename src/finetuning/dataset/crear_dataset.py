@@ -201,7 +201,7 @@ features = Features({
     ]
 })
 
-# 4) Crear y guardar el Dataset
+# 4) Crear y guardar el dataset
 dataset = Dataset.from_list(records, features=features)
 dataset.save_to_disk("poemas_GalicIA")
 print(dataset)

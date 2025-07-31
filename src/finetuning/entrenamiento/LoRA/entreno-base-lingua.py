@@ -1,9 +1,8 @@
 from datasets import load_dataset, concatenate_datasets
 from unsloth import FastLanguageModel
-from unsloth.chat_templates import get_chat_template
 from trl import SFTTrainer, SFTConfig
 
-# 1) Cargar y concatenar los 3 datasets de Proxecto Nós
+# 1) Cargar y concatenar los 3 datasets de ProxectoNós
 ds1 = load_dataset("proxectonos/belebele_gl", split="train")    # Reading comprehension :contentReference[oaicite:3]{index=3}
 ds2 = load_dataset("proxectonos/galcola", split="train")        # Linguistic acceptability :contentReference[oaicite:4]{index=4}
 ds3 = load_dataset("proxectonos/mgsm_gl", split="train")        # Math QA :contentReference[oaicite:5]{index=5}
@@ -23,23 +22,73 @@ model, tokenizer = FastLanguageModel.from_pretrained(
 # 3) Función de formateo genérica
 def formatting_prompts_func(examples):
     texts = []
-    for i in range(len(examples[list(examples.keys())[0]])):
-        # 1) Generar el prompt según el dataset
-        if "question" in examples and "answer" in examples:
+    # número de ejemplos en este batch
+    n = len(examples[next(iter(examples))])
+
+    for i in range(n):
+        # 1) Detección de tipo de dataset
+
+        # --- Reading comprehension (ds1) ---
+        if (
+                "flores_passage" in examples
+                and all(f"mc_answer{j}" in examples for j in range(1, 5))
+                and "correct_answer_num" in examples
+        ):
+            passage = examples["flores_passage"][i]
             q = examples["question"][i]
-            a = examples["answer"][i]
-            prompt = f"### Instrucción:\nResponde a la siguiente pregunta:\n{q}\n\n### Respuesta:\n{a}"
+            # recoge las 4 opciones
+            opciones = [examples[f"mc_answer{j}"][i] for j in range(1, 5)]
+            # índice (cadena) a entero para elegir la respuesta correcta
+            idx_corr = int(examples["correct_answer_num"][i]) - 1
+
+            prompt = (
+                "### Instrucción:\n"
+                "Lee el siguiente pasaje y responde la pregunta eligiendo la opción correcta:\n\n"
+                f"{passage}\n\n"
+                f"Pregunta: {q}\n\n"
+                "Opciones:\n"
+                f"1) {opciones[0]}\n"
+                f"2) {opciones[1]}\n"
+                f"3) {opciones[2]}\n"
+                f"4) {opciones[3]}\n\n"
+                "### Respuesta:\n"
+                f"{opciones[idx_corr]}"
+            )
+
+        # --- Linguistic acceptability (ds2) ---
         elif "sentence" in examples and "label" in examples:
             s = examples["sentence"][i]
             lbl = "Aceptable" if examples["label"][i] == 1 else "No aceptable"
-            prompt = f"### Instrucción:\n¿Es esta oración gramaticalmente aceptable en gallego?\n\"{s}\"\n\n### Respuesta:\n{lbl}"
+
+            prompt = (
+                "### Instrucción:\n"
+                "¿Es esta oración gramaticalmente aceptable en gallego?\n"
+                f"\"{s}\"\n\n"
+                "### Respuesta:\n"
+                f"{lbl}"
+            )
+
+        # --- Math QA (ds3) ---
+        elif "question" in examples and "answer" in examples:
+            q = examples["question"][i]
+            a = examples["answer"][i]
+
+            prompt = (
+                "### Instrucción:\n"
+                "Responde a la siguiente pregunta:\n"
+                f"{q}\n\n"
+                "### Respuesta:\n"
+                f"{a}"
+            )
+
+        # --- Fallback genérico ---
         else:
             prompt = str({k: examples[k][i] for k in examples})
 
-        # 2) Envolver en una lista de mensajes
+        # 2) Envuelve en lista de mensajes
         convo = [{"role": "user", "content": prompt}]
 
-        # 3) Aplicar plantilla de chat sobre esa lista
+        # 3) Aplica plantilla de chat
         texts.append(
             tokenizer.apply_chat_template(
                 convo,

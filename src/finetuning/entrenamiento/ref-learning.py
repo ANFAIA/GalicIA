@@ -91,7 +91,7 @@ trainer = PPOTrainer(
     tokenizer=tokenizer,
 )
 
-# --- 7. Dataset ------------------------------------------------------------
+# --- 7. dataset ------------------------------------------------------------
 
 def gen_schemes(max_len: int) -> List[List[str | None]]:
     schemes: List[List[str | None]] = [[None] * L for L in range(1, max_len + 1)]

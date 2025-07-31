@@ -1,7 +1,5 @@
 from datasets import load_from_disk
-from datasets import Dataset as HFDataset
 from unsloth import FastLanguageModel
-from unsloth.chat_templates import get_chat_template
 from trl import SFTTrainer, SFTConfig
 
 # 1) Cargar y preprocesar dataset
@@ -32,12 +30,9 @@ def formatting_prompts_func(examples):
         ]
     }
 
-ds_formatted = raw_ds.map(
-    formatting_prompts_func,
-    batched=True,
-)
+ds_formatted = raw_ds.map(formatting_prompts_func,batched=True,)
 
-# 4) Envolver en HF Dataset
+# 4) Envolver en HF dataset
 #hf_dataset = HFDataset.from_dict({"text": ds_formatted["text"]})
 print(ds_formatted)
 print(ds_formatted[0])

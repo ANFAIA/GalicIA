@@ -44,15 +44,15 @@ def adjust_for_ending(logits, history_ids, target_syl, current_syl,inte,exc):
     si no, los penaliza para que no terminen prematuramente.
     """
     eos_id = tokenizer.eos_token_id
-    #print(current_syl)
+    print(current_syl)
     # Si aún no llegamos a la sílaba objetivo, penalizamos EOS y newline
     if current_syl < target_syl:
         logits[:, eos_id]   -= 99.0
         logits[:, newline_id] -= 99.0
     else:
         # Cerca o pasados de target_syl, permitimos cerrar el verso
-        logits[:, eos_id]   += 18.0
-        logits[:, newline_id] += 18.0
+        logits[:, eos_id]   += 16.0
+        logits[:, newline_id] += 16.0
         if inte>0:
             logits[:, question_end] += 10.0
         else:
@@ -105,13 +105,12 @@ def sample_token(history_ids, past_kv, mask, target_syl, current_syl, inte,exc,t
     probs = torch.softmax(l, dim=-1)
     vals, idxs = torch.topk(probs, 10, dim=-1)
     entries = [f"{tokenizer.decode(int(i)).replace('\n','↵')}:{float(v)*100:5.2f}%" for i, v in zip(idxs[0], vals[0])]
-    #print("    ▶ Top-10:", ", ".join(entries))
+    print("    ▶ Top-10:", ", ".join(entries))
 
     # Muestreo final
     next_token = torch.multinomial(probs, num_samples=1)
     tok_str = tokenizer.decode(next_token[0])
-    if tok_str!='\n':
-        print(f"{tok_str}", end="")
+    print(f"    ↪ Elegido: '{tok_str}'")
     return next_token, past_kv
 
 # Generación de poema con métrica, rima, heurística y backtracking parcial
@@ -165,7 +164,7 @@ def generate_structured_poem(structure, max_attempts=8, max_steps=100):
                     text = ''.join(words)
                     min_s, max_s = rango_silabas(text)
                     current_syl = (min_s + max_s) // 2
-                    #print(f"    - Parcial: '{text}', sílabas aprox. {current_syl}")
+                    print(f"    - Parcial: '{text}', sílabas aprox. {current_syl}")
 
                 verse = ''.join(words).strip()
                 print(f"  Generado: '{verse}'")
@@ -231,6 +230,6 @@ if __name__ == '__main__':
         exit(1)
 
     print("\n=== POEMA FINAL ===\n", poem)
-    with open('poema.txt', 'w', encoding='utf-8') as f:
+    with open('../poema.txt', 'w', encoding='utf-8') as f:
         f.write(poem)
     print("\n[✓] Poema guardado en 'poema.txt'")
