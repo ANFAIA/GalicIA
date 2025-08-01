@@ -4,10 +4,12 @@ from trl import SFTTrainer, SFTConfig
 
 # 1) Cargar y preprocesar dataset
 raw_ds = load_from_disk("poemas_GalicIA")
+print(raw_ds)
+
 
 # 2) Cargar modelo y tokenizer
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Qwen3-0.6B",
+    model_name="galicIA-base",
     max_seq_length=512,
     load_in_4bit=False,
     load_in_8bit=False,

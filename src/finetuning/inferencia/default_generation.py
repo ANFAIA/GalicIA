@@ -8,7 +8,7 @@ model     = AutoModelForCausalLM.from_pretrained(checkpoint, local_files_only=Tr
 
 # Mensaje de entrada
 messages = [
-    {"role": "user", "content": "Xera un poema sobre voar nun avión"}
+    {"role": "user", "content": "Dame un poema sobre un gato"}
 ]
 
 # Prepara los tensores con el template de chat
