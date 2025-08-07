@@ -135,10 +135,10 @@ trainer = SFTTrainer(
         gradient_accumulation_steps=8,
 
         # o bien en lugar de max_steps, si tu versión de TRL lo soporta:
-        # num_train_epochs=3,
+        num_train_epochs=2,
 
         # total_steps = 804 pasos/época × 3 épocas
-        max_steps=2412,
+        #max_steps=2412,
 
         learning_rate=8e-5,
         weight_decay=0.01,
