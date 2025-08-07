@@ -223,15 +223,16 @@ def rima_asonante(pal: str) -> str:
 
     # 2) localizar vocal tónica
     syls = _silabear(w)
+    #print(syls)
     idx  = _tonic_index(w, syls)
 
     # 3) sufijo desde la tónica
     suf  = _strip_acc(w[idx:])                 # sin tildes
-
+    #print(suf)
     # 4) descartar semivocal i/u inicial SÓLO si forma diptongo inmediato
-    if (len(suf) >= 2 and suf[0] in "iu" and suf[1] in "aeo"):
-        suf = suf[1:]
-
+    #if (len(suf) >= 2 and suf[0] in "iu" and suf[1] in "aeo"):
+    #    suf = suf[1:]
+    #print(suf)
     # 5) quedarse sólo con vocales
     return "".join(c for c in suf if c in "aeiou")
 

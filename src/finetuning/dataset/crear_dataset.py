@@ -122,6 +122,13 @@ def parse_poem_file(path: Path):
     data["text"] = data["text"].strip()
     return data
 
+def limpiar_string(s):
+    # 1) eliminar todos los dígitos
+    sin_digitos = re.sub(r'\d+', '', s)
+    # 2) reemplazar '_' por espacio
+    resultado = sin_digitos.replace('_', ' ')
+    return resultado
+
 def analizar_estrofa(poema):
     """
     Analiza cada verso del poema y devuelve un string con los resultados
@@ -164,7 +171,7 @@ def get_promt(autor: str, movemento: str, poema: str,rima:str,model: str = "gpt-
                     "role": "user",
                     "content": [
                         {"type": "text", "text": promt_generator},
-                        {"type": "text", "text": f"""Devolver só o a frase do promt.\nAutor: {autor}\nMovemento: {movemento}\nPoema: {poema}\nRima: {rima}Devolverás:"""}
+                        {"type": "text", "text": f"""Devolver só o a frase do promt.\nAutor: {limpiar_string(autor)}\nMovemento: {movemento}\nPoema: {poema}\nRima: {rima}Devolverás:"""}
                     ],
                 }
             ],
@@ -188,11 +195,12 @@ for txt_path in ROOT_DIR.rglob("*.txt"):
     estrofa=extraer_primera_estrofa(parsed["text"])
     rima=analizar_estrofa(estrofa)
     # Claves y roles según lo que espera apply_chat_template
-    conv = [
-        {"role": "user",      "content": get_promt(parsed['author'],parsed['period'],parsed["text"],rima)},
-        {"role": "assistant", "content": completion}
-    ]
-    records.append({"conversations": conv})
+    if parsed['period']=="Trovadorismo":
+        conv = [
+            {"role": "user",      "content": get_promt(parsed['author'],parsed['period'],parsed["text"],rima)},
+            {"role": "assistant", "content": completion}
+        ]
+        records.append({"conversations": conv})
 
 # 3) Definición de features (lista de dicts, sin Sequence)
 features = Features({
@@ -203,5 +211,5 @@ features = Features({
 
 # 4) Crear y guardar el dataset
 dataset = Dataset.from_list(records, features=features)
-dataset.save_to_disk("poemas_GalicIA")
+dataset.save_to_disk("bases_movimientos/poemas_GalicIA_trovadorismo")
 print(dataset)

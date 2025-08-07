@@ -2,13 +2,13 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.extractor_métrica.procesar_poema import rango_silabas, rima_consonante, rima_asonante
 
-checkpoint = "galicIA-v1"
+checkpoint = "galicIA-v1-trovadorismo"
 tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
 model = AutoModelForCausalLM.from_pretrained(checkpoint, local_files_only=True)
 model.eval()
 
 # Prompt inicial
-initial_prompt = "Xera un poema sobre un gato."
+initial_prompt = "Faime un sobre poema dun gato."
 
 # Prepara inputs para history
 tokens = tokenizer.apply_chat_template(
@@ -71,7 +71,7 @@ def adjust_for_rhyme(logits, target_rhyme, current_syl, target_syl, tokenizer):
     de tokens cuya cadena termina con el patrón de rima.
     """
 
-    if target_rhyme and current_syl >= target_syl - 2:
+    if target_rhyme and current_syl >= target_syl - 3:
         print(f"  [Heurística Rima] Cerca fin, boost tokens con rima '{target_rhyme}'")
         # Recorremos topk vocab ids para boost (por eficiencia)
         for token_id in range(logits.size(-1)):
@@ -142,29 +142,52 @@ def generate_structured_poem(structure, max_attempts=8, max_steps=100):
                     mask = None
                     history = next_token if past_kv else torch.cat([history, next_token], dim=1)
                     w = tokenizer.decode(next_token[0])
-
-                    # Sólo consideramos fin de verso si hemos alcanzado la métrica
-                    if (w == tokenizer.eos_token or "\n" in w) and current_syl >= target_syl:
-                        print("    - Fin de verso detectado")
-                        break
-
+                    tok_str = tokenizer.decode(next_token[0])
                     # Si sale '\n' antes de tiempo, lo tratamos como parte del verso
-                    if "\n" in w and current_syl < target_syl:
-                        w = w.replace("\n", "")
-                    if "¿" in w and current_syl < target_syl:
+                    if tok_str == "\n" and current_syl < target_syl:
+                        w = w[:-1]
+                        w = w.replace('\n', ' ')
+                    if tok_str == "¿" and current_syl < target_syl:
                         inte=inte+1
-                    if "¡" in w and current_syl < target_syl:
+                    if tok_str == "¡" and current_syl < target_syl:
                         exc=exc+1
-                    if "?" in w and current_syl < target_syl:
+                    if tok_str == "?" and current_syl < target_syl:
                         inte=inte-1
-                    if "!" in w and current_syl < target_syl:
+                    if "!" == tok_str and current_syl < target_syl:
                         exc=exc-1
 
                     words.append(w)
                     text = ''.join(words)
                     min_s, max_s = rango_silabas(text)
-                    current_syl = (min_s + max_s) // 2
-                    print(f"    - Parcial: '{text}', sílabas aprox. {current_syl}")
+                    current_syl = max_s
+                    if min_s>target_syl:
+                        print(f"Verso {verse_idx} de estrofa {stanza_idx} no válido")
+                        break
+                    else:
+                        print(f"    - Parcial: '{text}', sílabas aprox. {current_syl}")
+
+                        # Sólo consideramos fin de verso si hemos alcanzado la métrica
+                        if (w == tokenizer.eos_token or "\n" in w) and current_syl >= target_syl:
+                            print("    - Fin de verso detectado")
+                            if letter:
+                                last_word = text.split()[-1] if text else ''
+                                r = rima_asonante(last_word)
+                                if letter not in rhyme_map and current_syl:
+                                    break
+                                else:
+                                    if (r != rhyme_map[letter]):
+                                        words = []
+                                        text = ''.join(words)
+                                        history = init_history_ids.clone()
+                                        past_kv = None
+                                        mask = init_mask
+                                        words = []
+                                        current_syl = 0
+                                        print(f"  [Rima] '{rhyme_map[letter]}' ≠'{r}'. Repitiendo")
+                                    else:
+                                        break
+                            else:
+                                break
 
                 verse = ''.join(words).strip()
                 print(f"  Generado: '{verse}'")
@@ -174,10 +197,10 @@ def generate_structured_poem(structure, max_attempts=8, max_steps=100):
                 metric_ok = (min_s <= target_syl <= max_s)
 
                 # Verificación de rima
-                if letter:
+                if letter and metric_ok:
                     last_word = verse.split()[-1] if verse else ''
                     r = rima_asonante(last_word)
-                    if letter not in rhyme_map:
+                    if letter not in rhyme_map and metric_ok:
                         rhyme_map[letter] = r
                         print(f"  [Rima] Asignada letra '{letter}' -> '{r}'")
                     rhyme_ok = (r == rhyme_map[letter])
@@ -198,20 +221,6 @@ def generate_structured_poem(structure, max_attempts=8, max_steps=100):
                         reasons.append(f"rima '{r}'≠'{rhyme_map[letter]}'")
                     print(f"  ✗ RECHAZADO: {'; '.join(reasons)}")
 
-                    # Si falla rima, recortar y reintentar sin contar intento
-                    if letter and not rhyme_ok and len(words) > 3:
-                        print("    - Recorte: quitando últimas 3 palabras, reintentando")
-                        words = words[:-3]
-                        partial = initial_prompt + ' ' + ''.join(words)
-                        inp = tokenizer(partial, return_tensors="pt")
-                        history = inp.input_ids
-                        mask = inp.attention_mask
-                        # recalcular current_syl
-                        text = ''.join(words)
-                        smin, smax = rango_silabas(text)
-                        current_syl = (smin + smax) // 2
-                        continue
-
             if not success:
                 raise RuntimeError(f"Verso {verse_idx} de estrofa {stanza_idx} no válido")
 
@@ -221,7 +230,7 @@ def generate_structured_poem(structure, max_attempts=8, max_steps=100):
 
 if __name__ == '__main__':
     # Estructura de ejemplo: estrofas con versos (sílabas, letra rima)
-    structure = [[(10, None), (8, None), (10, None), (8, None)],
+    structure = [[(8, None), (8, 'A'), (8, 'B'), (8, None)],
                  [(8, None), (8, None), (8, None), (8, None)]]
     try:
         poem = generate_structured_poem(structure)

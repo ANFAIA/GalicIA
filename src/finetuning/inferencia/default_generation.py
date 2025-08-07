@@ -2,13 +2,15 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStream
 import threading
 
 # Carga de checkpoint y tokenizer/model
-checkpoint = "galicIA-v1"
-tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
-model     = AutoModelForCausalLM.from_pretrained(checkpoint, local_files_only=True)
+#checkpoint = "Qwen/Qwen3-0.6B"
+#checkpoint="galicIA-base"
+checkpoint="galicIA-v1"
+tokenizer = AutoTokenizer.from_pretrained(checkpoint,)
+model     = AutoModelForCausalLM.from_pretrained(checkpoint)
 
 # Mensaje de entrada
 messages = [
-    {"role": "user", "content": "Dame un poema sobre un gato"}
+    {"role": "user", "content": "Hazme un poema sobre un perro que vive en un bosque"}
 ]
 
 # Prepara los tensores con el template de chat
@@ -19,6 +21,7 @@ inputs = tokenizer.apply_chat_template(
     return_tensors="pt",
     enable_thinking=False
 )
+print(inputs)
 
 # Crea el streamer
 streamer = TextIteratorStreamer(
@@ -31,9 +34,10 @@ streamer = TextIteratorStreamer(
 def generate_stream():
     model.generate(
         input_ids=inputs,
-        max_new_tokens=400,
+        max_new_tokens=150,
         repetition_penalty=1.6,
-        streamer=streamer
+        streamer=streamer,
+        #stop = ["\n\n"]
     )
 
 # Arranca el hilo de generación
