@@ -3,13 +3,13 @@ from unsloth import FastLanguageModel
 from trl import SFTTrainer, SFTConfig
 
 # 1) Cargar y preprocesar dataset
-raw_ds = load_from_disk("bases_movimientos/poemas_GalicIA_trovadorismo")
+raw_ds = load_from_disk("poemas_GalicIA")
 print(raw_ds)
 
 
 # 2) Cargar modelo y tokenizer
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="galicIA-v1",
+    model_name="galicIA-base",
     max_seq_length=512,
     load_in_4bit=False,
     load_in_8bit=False,
@@ -69,7 +69,7 @@ trainer = SFTTrainer(
         dataset_text_field="text",
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
-        num_train_epochs=2,
+        max_steps=300,
         learning_rate=8e-5,
         weight_decay=0.01,
         optim="adamw_8bit",
@@ -85,5 +85,5 @@ stats = trainer.train()
 print(stats)
 
 # 8) Guardar modelo
-model.save_pretrained("galicIA-v1-trovadorismo")
-tokenizer.save_pretrained("galicIA-v1-trovadorismo")
+model.save_pretrained("galicIA-v1")
+tokenizer.save_pretrained("galicIA-v1")

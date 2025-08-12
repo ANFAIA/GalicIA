@@ -195,7 +195,7 @@ for txt_path in ROOT_DIR.rglob("*.txt"):
     estrofa=extraer_primera_estrofa(parsed["text"])
     rima=analizar_estrofa(estrofa)
     # Claves y roles según lo que espera apply_chat_template
-    if parsed['period']=="Trovadorismo":
+    if True:#parsed['period']=="Trovadorismo":
         conv = [
             {"role": "user",      "content": get_promt(parsed['author'],parsed['period'],parsed["text"],rima)},
             {"role": "assistant", "content": completion}
