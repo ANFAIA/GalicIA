@@ -2,7 +2,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.extractor_métrica.procesar_poema import rango_silabas, rima_consonante, rima_asonante
 
-checkpoint = "galicIA-v1-trovadorismo"
+checkpoint = "galicIA-v1"
 tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
 model = AutoModelForCausalLM.from_pretrained(checkpoint, local_files_only=True)
 model.eval()
@@ -230,7 +230,7 @@ def generate_structured_poem(structure, max_attempts=8, max_steps=100):
 
 if __name__ == '__main__':
     # Estructura de ejemplo: estrofas con versos (sílabas, letra rima)
-    structure = [[(8, None), (8, 'A'), (8, 'B'), (8, None)],
+    structure = [[(8, None), (8,None), (8, None), (8, None)],
                  [(8, None), (8, None), (8, None), (8, None)]]
     try:
         poem = generate_structured_poem(structure)

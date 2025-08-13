@@ -9,7 +9,7 @@ print(raw_ds)
 
 # 2) Cargar modelo y tokenizer
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="galicIA-base",
+    model_name="unsloth/Qwen3-0.6B",
     max_seq_length=512,
     load_in_4bit=False,
     load_in_8bit=False,
@@ -39,6 +39,8 @@ ds_formatted = raw_ds.map(formatting_prompts_func,batched=True,)
 print(ds_formatted)
 print(ds_formatted[0])
 
+
+'''
 # 5) Ajustar PEFT/LoRA
 model = FastLanguageModel.get_peft_model(
     model,
@@ -58,6 +60,20 @@ model = FastLanguageModel.get_peft_model(
 
 # 6) Preparar para inferencia
 model = FastLanguageModel.for_inference(model)
+'''
+
+# 5) Ajustar PEFT/LoRA
+from peft import PeftModel
+model = PeftModel.from_pretrained(
+    model,
+    "galicIA-base",
+    is_trainable=True
+)
+
+# 6) Preparar para inferencia
+model.config.use_cache = False           # requerido con GC
+model.enable_input_require_grads()       # para que haya gradiente en input_ids emb
+model.gradient_checkpointing_enable()    # <- habilita GC "a lo HF
 
 # 7) Configurar y lanzar trainer
 trainer = SFTTrainer(
@@ -83,6 +99,8 @@ trainer = SFTTrainer(
 
 stats = trainer.train()
 print(stats)
+
+model = FastLanguageModel.for_inference(model)
 
 # 8) Guardar modelo
 model.save_pretrained("galicIA-v1")

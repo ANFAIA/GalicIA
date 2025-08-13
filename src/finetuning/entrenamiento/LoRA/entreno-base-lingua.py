@@ -120,7 +120,7 @@ model = FastLanguageModel.get_peft_model(
 )
 
 # 6) Preparar para inferencia
-model = FastLanguageModel.for_inference(model)
+#model = FastLanguageModel.for_inference(model)
 
 # 7) Configurar y lanzar trainer
 trainer = SFTTrainer(

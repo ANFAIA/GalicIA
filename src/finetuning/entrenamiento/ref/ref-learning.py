@@ -1,10 +1,5 @@
-# Copyright 2020-2025 The HuggingFace Team. All rights reserved.
-
-import os
-import warnings
 import random
 import torch
-from copy import deepcopy
 from typing import Dict, Any
 
 from datasets import load_from_disk, Dataset, DatasetDict
@@ -215,11 +210,11 @@ if __name__ == "__main__":
     training_args.gradient_checkpointing_kwargs = dict(use_reentrant=False)
 
     model_args = ModelConfig(
-        model_name_or_path="galicIA-v1",
+        model_name_or_path="pajon1/galicIA-v1",
         trust_remote_code=True,
         torch_dtype="auto",
         # Forzamos LoRA dentro del código:
-            use_peft=False,
+        use_peft=False,
         lora_r=700,
         lora_alpha=1400,
         lora_dropout=0.0,
