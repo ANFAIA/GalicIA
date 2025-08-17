@@ -12,11 +12,6 @@ Eres un xenerador de promts para un modelo llm, dado un poema, un autor e un mov
 Debes seguir este formato:
 Autor: Rosalía de castro
 Movemento: Rexurdimento
-Rima:
-5/8  rima='oe'
-7/8  rima='eo'
-7/9  rima='oo'
-8/9  rima='eo'
 Poema:
 Adios rios, adios fontes,
 Adios regatos pequenos,
@@ -81,13 +76,20 @@ Tantas legoas mar adentro...
 ¡Miña casiña! meu lar!
 
 Devolverás: 
-Dame un poema que trate da despedida nostálxica e dolorosa dun emigrante que abandona a sua tierra natal, expresando a añoranza e o sufrimento que supón a separación do seu fogar, seus paisaxes e seus seres queridos. Falo no estilo de Rosalía de castro no Rexurdimento con un esquema métrico 8– 8a 8– 8a de rima asonante.
+Dame un poema que trate da despedida nostálxica e dolorosa dun emigrante que abandona a sua tierra natal, expresando a añoranza e o sufrimento que supón a separación do seu fogar, seus paisaxes e seus seres queridos. Falo no estilo de Rosalía de castro no Rexurdimento.
 
+
+Si autor o el movimiento es desconocido no pongas nada de ello.
+Si ves que no tiene mucho sentido la rima y salabas del poema puedes adaptarlo un poco.
+"""
+
+'''
 8– 8a 8– 8a de rima asonante es el ÚNICO formato de indicar la métrica.
 Adapta elnúmero y la letra de la rima al poema dado, la letra es una forma de poner una misma rima pero en lugar po poner una rima pones una letra que la identifica: de 'ao'->'A'o 'B' o 'C' como un diccionario. 
 Cuidado podría haber versos libres '-'.
 NO pongas la rima original si no su 'letra del diccionario'.
-"""
+
+'''
 
 def extraer_primera_estrofa(poema: str) -> str:
     """
@@ -155,7 +157,7 @@ def analizar_estrofa(poema):
     return "\n".join(resultados)
 
 
-def get_promt(autor: str, movemento: str, poema: str,rima:str,model: str = "gpt-4.1", max_chars: int = 400_000):
+def get_promt(autor: str, movemento: str, poema: str,rima:str,model: str = "gpt-4.1-mini", max_chars: int = 400_000):
     """
     Descarga el HTML de `url`, lo trunca a `max_chars`
     y lo envía al endpoint /chat/completions junto con `prompt`.
@@ -171,7 +173,7 @@ def get_promt(autor: str, movemento: str, poema: str,rima:str,model: str = "gpt-
                     "role": "user",
                     "content": [
                         {"type": "text", "text": promt_generator},
-                        {"type": "text", "text": f"""Devolver só o a frase do promt.\nAutor: {limpiar_string(autor)}\nMovemento: {movemento}\nPoema: {poema}\nRima: {rima}Devolverás:"""}
+                        {"type": "text", "text": f"""Devolver só o a frase do promt.\nAutor: {limpiar_string(autor)}\nMovemento: {movemento}\nPoema: {poema}\nDevolverás:"""}
                     ],
                 }
             ],
@@ -211,5 +213,5 @@ features = Features({
 
 # 4) Crear y guardar el dataset
 dataset = Dataset.from_list(records, features=features)
-dataset.save_to_disk("bases_movimientos/poemas_GalicIA_trovadorismo")
+dataset.save_to_disk("poemas_GalicIA_norima")
 print(dataset)

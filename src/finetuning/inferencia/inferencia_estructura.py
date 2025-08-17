@@ -2,13 +2,13 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.extractor_métrica.procesar_poema import rango_silabas, rima_consonante, rima_asonante
 
-checkpoint = "galicIA-v1"
+checkpoint = "galicIA-full-FIM"
 tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
 model = AutoModelForCausalLM.from_pretrained(checkpoint, local_files_only=True)
 model.eval()
 
 # Prompt inicial
-initial_prompt = "Faime un sobre poema dun gato."
+initial_prompt = "Faime un sobre poema dun gato que durmúa nun balcón."
 
 # Prepara inputs para history
 tokens = tokenizer.apply_chat_template(

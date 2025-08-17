@@ -4,13 +4,13 @@ import threading
 # Carga de checkpoint y tokenizer/model
 #checkpoint = "Qwen/Qwen3-0.6B"
 #checkpoint="galicIA-base"
-checkpoint="galicIA-v1"
+checkpoint="galicIA-full-FIM"
 tokenizer = AutoTokenizer.from_pretrained(checkpoint,)
 model     = AutoModelForCausalLM.from_pretrained(checkpoint)
 
 # Mensaje de entrada
 messages = [
-    {"role": "user", "content": "Faime un poema sobre un can"}
+    {"role": "user", "content": "Faime un poema dun can que durmía nun balcón"}
 ]
 
 # Prepara los tensores con el template de chat
