@@ -2,15 +2,15 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStream
 import threading
 
 # Carga de checkpoint y tokenizer/model
-#checkpoint = "Qwen/Qwen3-0.6B"
-#checkpoint="galicIA-base"
-checkpoint="galicIA-full-FIM"
+#checkpoint = "Qwen/Qwen3-3B"
+checkpoint="pajon1/galicIA-v1"
+#checkpoint="galicIA-full-FIM"
 tokenizer = AutoTokenizer.from_pretrained(checkpoint,)
 model     = AutoModelForCausalLM.from_pretrained(checkpoint)
 
 # Mensaje de entrada
 messages = [
-    {"role": "user", "content": "Faime un poema dun can que durmía nun balcón"}
+    {"role": "user", "content": "Dame un poema que exprese a dor e a nostalxia dun emigrante que escoita ao lonxe as campaniñas da súa aldea"}
 ]
 
 # Prepara los tensores con el template de chat
