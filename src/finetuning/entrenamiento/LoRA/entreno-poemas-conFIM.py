@@ -55,6 +55,10 @@ def _first_assistant_text(conversations):
 # 3) Convertir a texto con prompt de generación (mezcla normal + FIM con cambios mínimos)
 def formatting_prompts_func(examples, fim_ratio: float = 0.3):
     out = []
+    if fim_ratio>1:
+        prev = formatting_prompts_func(examples, fim_ratio - 1)
+        out.extend(prev["text"])  # <--- aplanar en lugar de append
+        fim_ratio = 1.0  # última pasada completa (prob=1.0)
     for conv in examples["conversations"]:
         make_fim = random.random() < fim_ratio
         if make_fim:

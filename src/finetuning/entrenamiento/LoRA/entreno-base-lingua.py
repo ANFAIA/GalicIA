@@ -13,7 +13,7 @@ print(raw_ds)
 
 # 2) Cargar modelo y tokenizer
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Qwen3-0.6B",
+    model_name="unsloth/Qwen3-1.7B",
     max_seq_length=512,
     load_in_4bit=False,
     load_in_8bit=False,
@@ -101,16 +101,16 @@ ds_formatted = raw_ds.map(formatting_prompts_func, batched=True, remove_columns=
 print(ds_formatted)
 print(ds_formatted[0])
 
-
+r_config=60
 # 5) Envolver en PEFT/LoRA
 model = FastLanguageModel.get_peft_model(
     model,
-    r=700,
+    r=r_config,
     target_modules=[
         "q_proj","k_proj","v_proj","o_proj",
         "gate_proj","up_proj","down_proj",
     ],
-    lora_alpha=1400,
+    lora_alpha=r_config*2,
     lora_dropout=0,
     bias="none",
     use_gradient_checkpointing="unsloth",
