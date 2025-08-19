@@ -1,34 +1,11 @@
-"""
-Este script demuestra cómo continuar el entrenamiento de un modelo de recompensa
-utilizando TRL y adaptadores LoRA. Parte de una base de datos que contiene
-mensajes de usuario y especificaciones de estructura poética y construye un
-conjunto de preferencias heurísticas para formar pares ``chosen``/``rejected``.
-
-El modelo de partida es un LoRA ya entrenado (``pajon1/galicIA-v1``) con base
-``unsloth/Qwen3-0.6B``. A partir de la configuración de este adaptador se
-extraen los parámetros principales (rango, alfa, dropout y módulos objetivo)
-observados en su archivo ``adapter_config.json``【642958274612479†L56-L124】. Para
-que el adaptador siga evolucionando en una tarea de clasificación (reward
-modeling) se carga el modelo base como un ``AutoModelForSequenceClassification``
-con una única etiqueta y posteriormente se inyecta el adaptador LoRA con
-``is_trainable=True``. De esta forma, sólo se actualizan las matrices de bajo
-rango del adaptador sin modificar el modelo completo.
-
-El entrenamiento se realiza con ``RewardTrainer`` de TRL. Se usa una fracción
-pequeña del dataset para ahorrar recursos y demostrar el flujo. La función
-``score_poem`` define una recompensa heurística basada en el número de sílabas
-y rimas de cada línea, con pequeños ajustes para vocabulario gallego. La
-función ``build_preference_dataset`` toma cada ejemplo del dataset y genera
-dos candidatos de poema usando el modelo generativo (no mostrado aquí) y
-selecciona el mejor según la heurística para construir los pares
-``chosen``/``rejected``.
-"""
-
 import random
-from typing import Dict, Any
-
 import torch
-from datasets import Dataset, DatasetDict, load_from_disk
+import json
+import os
+from datetime import datetime
+from typing import Dict, Any, List, Tuple
+
+from datasets import load_from_disk, Dataset, DatasetDict
 from transformers import (
     AutoModelForSequenceClassification,
     AutoModelForCausalLM,
@@ -40,159 +17,274 @@ from trl import (
     RewardTrainer,
     ScriptArguments,
     get_kbit_device_map,
+    get_peft_config,
     get_quantization_config,
     setup_chat_format,
 )
-from peft import PeftModel
 
-# -----------------------------------------------------------------------------
-# Heurísticas para medir la calidad de un poema respecto a su estructura
-# -----------------------------------------------------------------------------
-VOWELS = set("aeiouáéíóúàèìòùâêîôûäëïöüAEIOUÁÉÍÓÚÂÊÎÔÛÄËÏÖÜ")
+# Importar las funciones de evaluación métrica más precisas
+from src.extractor_métrica.procesar_poema import rango_silabas, rima_consonante, rima_asonante
 
 
-def approx_syllables(word: str) -> int:
-    """
-    Cuenta grupos vocálicos como aproximación del número de sílabas.
+# Configurar logging
+def setup_logging(output_dir: str):
+    """Configurar archivo de log para el entrenamiento"""
+    os.makedirs(output_dir, exist_ok=True)
+    log_file = os.path.join(output_dir, "training_log.txt")
 
-    Esta heurística no es exacta pero ofrece una medida estable sin necesidad
-    de listas de diccionario.
-    """
-    if not word:
-        return 0
-    prev_vowel = False
-    count = 0
-    for ch in word:
-        is_vowel = ch in VOWELS
-        if is_vowel and not prev_vowel:
-            count += 1
-        prev_vowel = is_vowel
-    return max(count, 1)
+    # Escribir encabezado del log
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write("=" * 80 + "\n")
+        f.write(f"GALICIA RL TRAINING LOG - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("=" * 80 + "\n\n")
+
+    return log_file
 
 
-def approx_line_syllables(line: str) -> int:
-    """
-    Devuelve el número aproximado de sílabas de una línea sumando las sílabas
-    de cada palabra.
-    """
-    return sum(approx_syllables(w) for w in line.strip().split())
+def log_training_step(log_file: str, step: int, example: Dict, prompt: str,
+                      cand1: str, cand2: str, sc1: float, sc2: float,
+                      chosen: str, rejected: str, structure: List[Dict]):
+    """Registrar detalles de cada paso del entrenamiento"""
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"\n{'=' * 60}\n")
+        f.write(f"TRAINING STEP {step}\n")
+        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'=' * 60}\n\n")
+
+        # Prompt original del usuario (sin modificaciones)
+        f.write("PROMPT ORIGINAL:\n")
+        f.write("-" * 40 + "\n")
+        original_prompt = example.get("conversations", {}).get("content", [""])[0]
+        f.write(f"{original_prompt}\n\n")
+
+        # Estructura métrica
+        f.write("ESTRUCTURA MÉTRICA:\n")
+        f.write("-" * 40 + "\n")
+        if structure:
+            for i, stanza in enumerate(structure):
+                syllables = stanza.get("syllables", [])
+                rhymes = stanza.get("rhyme", [])
+                f.write(f"Estrofa {i + 1}:\n")
+                f.write(f"  Sílabas: {syllables}\n")
+                f.write(f"  Rimas: {rhymes}\n")
+        else:
+            f.write("No hay estructura definida\n")
+        f.write("\n")
+
+        # Prompt completo usado para generación (debería ser igual al original ahora)
+        f.write("PROMPT USADO PARA GENERACIÓN:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"{prompt}\n\n")
+
+        # Candidato 1
+        f.write("CANDIDATO 1:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Puntuación: {sc1:.3f}\n")
+        f.write(f"Texto:\n{cand1}\n\n")
+
+        # Candidato 2
+        f.write("CANDIDATO 2:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Puntuación: {sc2:.3f}\n")
+        f.write(f"Texto:\n{cand2}\n\n")
+
+        # Resultado de la comparación
+        f.write("RESULTADO:\n")
+        f.write("-" * 40 + "\n")
+        winner = "CANDIDATO 1" if sc1 > sc2 else "CANDIDATO 2"
+        f.write(f"Ganador: {winner} (diff: {abs(sc1 - sc2):.3f})\n")
+        f.write(f"Elegido: {chosen[:100]}...\n")
+        f.write(f"Rechazado: {rejected[:100]}...\n\n")
 
 
-def rhyme_key(line: str) -> str:
-    """
-    Genera una clave de rima simple tomando las últimas tres letras del último
-    token alfanumérico de la línea. Se utiliza para comparar rimas entre
-    diferentes líneas.
-    """
-    tokens = [t for t in ''.join(ch if ch.isalnum() else ' ' for ch in line.lower()).split() if t]
-    if not tokens:
+def extract_syllable_count(verso: str) -> int:
+    """Extraer número de sílabas de un verso usando rango_silabas y tomando el valor medio"""
+    mn, mx = rango_silabas(verso)
+    return (mn + mx) // 2  # Tomar el valor medio del rango
+
+
+def extract_rhyme_pattern(verso: str, rhyme_type: str = "asonante") -> str:
+    """Extraer patrón de rima de un verso"""
+    if not verso.strip():
         return ""
-    last = tokens[-1]
-    return last[-3:] if len(last) >= 3 else last
+
+    last_word = verso.split()[-1] if verso.split() else ""
+    if not last_word:
+        return ""
+
+    if rhyme_type == "consonante":
+        return rima_consonante(last_word)
+    else:
+        return rima_asonante(last_word)
 
 
-def score_poem(text: str, structure) -> float:
+def score_poem_advanced(text: str, structure: List[Dict]) -> float:
     """
-    Calcula una puntuación heurística de un poema comparando su estructura con
-    la especificada.
-
-    La puntuación penaliza desviaciones en el número de estrofas, número de
-    líneas por estrofa, número de sílabas por línea y rimas. También añade un
-    pequeño bonus si aparecen palabras comunes en gallego.
+    Función de puntuación usando evaluación métrica (sin bonus léxico gallego ni penalización por longitud).
 
     Args:
-        text: El poema generado, con estrofas separadas por una línea en blanco.
-        structure: Lista de diccionarios, cada uno con claves 'syllables' y 'rhyme'
-            para la estrofa correspondiente.
+        text: poema completo (con saltos de línea)
+        structure: lista de estrofas con estructura esperada
 
     Returns:
-        Puntuación numérica (float) que cuanto mayor, mejor ajuste tiene.
+        float: puntuación del poema (mayor es mejor)
     """
-    stanzas = [s for s in text.strip().split("\n\n") if s.strip()]
-    target_stanzas = len(structure)
-    score = -abs(len(stanzas) - target_stanzas) * 1.0
+    if not text.strip():
+        return -10.0
 
-    for i, st in enumerate(stanzas[:target_stanzas]):
-        lines = [l for l in st.strip().split("\n") if l.strip()]
-        target_syllables = structure[i].get("syllables", [])
-        target_rhymes = structure[i].get("rhyme", [])
-        score -= abs(len(lines) - len(target_syllables)) * 0.5
+    # Validar y limpiar estructura
+    if not structure or not isinstance(structure, list):
+        return -5.0
 
-        rhyme_map = {}
-        for j, line in enumerate(lines[: len(target_syllables)]):
-            syl = approx_line_syllables(line)
-            score -= abs(syl - target_syllables[j]) * 0.2
-            if j < len(target_rhymes):
-                lab = target_rhymes[j]
-                rhyme_map.setdefault(lab, []).append(rhyme_key(line))
+    valid_structure = []
+    for stanza_info in structure:
+        if not isinstance(stanza_info, dict):
+            continue
 
-        for lab, keys in rhyme_map.items():
-            if len(keys) > 1:
-                base = keys[0]
-                mismatches = sum(1 for k in keys[1:] if k != base)
-                score -= mismatches * 0.5
+        syllables = stanza_info.get("syllables", [])
+        rhymes = stanza_info.get("rhyme", [])
 
-    # Bonus por vocabulario común en gallego
-    if any(tok in text.lower() for tok in [
-        "non",
-        "que",
-        "coa",
-        "noite",
-        "lúa",
-        "auga",
-        "terra",
-        "vento",
-    ]):
-        score += 0.3
+        # Filtrar valores None y validar tipos
+        if syllables and isinstance(syllables, list):
+            syllables = [s for s in syllables if s is not None and isinstance(s, (int, float))]
+        else:
+            syllables = []
+
+        if rhymes and isinstance(rhymes, list):
+            rhymes = [r for r in rhymes if r is not None and isinstance(r, str)]
+        else:
+            rhymes = []
+
+        if syllables or rhymes:  # Incluir si tiene al menos sílabas o rimas válidas
+            valid_structure.append({
+                "syllables": syllables,
+                "rhyme": rhymes
+            })
+
+    if not valid_structure:
+        return -5.0
+
+    # Dividir en estrofas
+    stanzas = [s.strip() for s in text.strip().split("\n\n") if s.strip()]
+    expected_stanzas = len(valid_structure)
+
+    # Penalización por número incorrecto de estrofas
+    score = -abs(len(stanzas) - expected_stanzas) * 2.0
+
+    # Evaluar cada estrofa
+    for i, stanza in enumerate(stanzas[:expected_stanzas]):
+        if i >= len(valid_structure):
+            break
+
+        lines = [line.strip() for line in stanza.split("\n") if line.strip() or line == ""]
+        expected_structure = valid_structure[i]
+        expected_syllables = expected_structure.get("syllables", [])
+        expected_rhymes = expected_structure.get("rhyme", [])
+
+        # Si no hay estructura válida para esta estrofa, seguir sin modificar score
+        if not expected_syllables and not expected_rhymes:
+            continue
+
+        # Penalización por número incorrecto de versos (solo si tenemos syllables esperadas)
+        if expected_syllables:
+            score -= abs(len([l for l in lines if l.strip()]) - len(expected_syllables)) * 1.5
+
+        # Evaluar sílabas y rimas de cada verso
+        rhyme_groups = {}
+
+        for j, line in enumerate(lines):
+            if not line.strip():
+                score -= 2.0
+                continue
+
+            # Evaluar sílabas
+            if j < len(expected_syllables):
+                try:
+                    actual_syllables = extract_syllable_count(line)
+                    expected_syl = expected_syllables[j]
+                    syllable_diff = abs(actual_syllables - expected_syl)
+
+                    # Penalización escalada por diferencia de sílabas
+                    if syllable_diff == 0:
+                        score += 1.0  # Bonus por sílabas exactas
+                    elif syllable_diff <= 1:
+                        score -= 0.3  # Penalización leve por 1 sílaba de diferencia
+                    elif syllable_diff <= 2:
+                        score -= 0.8  # Penalización moderada
+                    else:
+                        score -= syllable_diff * 0.5  # Penalización fuerte
+                except Exception as e:
+                    print(f"Error evaluating syllables for line '{line}': {e}")
+                    score -= 1.0  # Penalización por error
+
+            # Evaluar rimas (etiquetas iguales deben rimar de forma consistente)
+            if j < len(expected_rhymes) and expected_rhymes[j] is not None:
+                rhyme_label = expected_rhymes[j]
+                try:
+                    rhyme_pattern = extract_rhyme_pattern(line, "asonante")
+                    if rhyme_label not in rhyme_groups:
+                        rhyme_groups[rhyme_label] = []
+                    rhyme_groups[rhyme_label].append(rhyme_pattern)
+                except Exception as e:
+                    print(f"Error evaluating rhyme for line '{line}': {e}")
+                    score -= 0.5  # Penalización menor por error de rima
+
+        # Evaluar consistencia de rimas dentro de cada grupo
+        for rhyme_label, patterns in rhyme_groups.items():
+            if len(patterns) <= 1:
+                continue
+
+            unique_patterns = set(p for p in patterns if p)  # Excluir patrones vacíos
+
+            if len(unique_patterns) == 0:
+                score -= 1.0  # Sin patrón de rima
+            elif len(unique_patterns) == 1:
+                score += len(patterns) * 0.8  # Rima consistente
+            else:
+                inconsistency_penalty = (len(unique_patterns) - 1) * 0.7
+                score -= inconsistency_penalty  # Rima inconsistente
+
     return float(score)
 
 
-def messages_from_example(ex: Dict[str, Any], tokenizer) -> list:
+
+def messages_from_example(ex: Dict[str, Any], tokenizer):
     """
-    Construye una conversación de chat a partir de un ejemplo del dataset.
-    Inyecta una pista de la estructura a seguir (sílabas y rima) para ayudar al
-    modelo generativo a producir poemas ajustados a las especificaciones.
+    Construye mensajes de chat a partir del ejemplo del dataset
     """
+    # Usar SOLO el prompt original del dataset, sin modificaciones
     user_prompt = ex["conversations"]["content"][0]
-    structure_hint = ""
-    try:
-        patt = ex.get("structure") or []
-        patt_str = "; ".join(
-            f"{'/'.join(map(str, p.get('syllables', [])))} con rima {''.join(p.get('rhyme', []))}"
-            for p in patt
-        )
-        if patt_str:
-            structure_hint = f"\n\nSegue esta estrutura: {patt_str}. Escribe en galego."
-    except Exception:
-        pass
+
     messages = [
-        {"role": "user", "content": user_prompt + structure_hint},
+        {"role": "user", "content": user_prompt}
     ]
     return messages
 
 
-def generate_two_candidates(
-    ex: Dict[str, Any],
-    gen_model,
-    gen_tok,
-    max_new_tokens: int = 180,
-    temperature: float = 0.9,
-    top_p: float = 0.95,
-) -> tuple[str, str]:
-    """
-    Genera dos candidatos distintos para un poema a partir de un ejemplo usando
-    muestreo estocástico (top_p/temperature). La función devuelve los textos
-    generados sin el prompt inicial para que se puedan puntuar y comparar.
-    """
+def generate_two_candidates(ex, gen_model, gen_tok, max_new_tokens=150, temperature=0.9, top_p=0.95):
+    """Generar dos candidatos de poemas para comparación"""
     messages = messages_from_example(ex, gen_tok)
-    prompt = gen_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    inputs = gen_tok(prompt, return_tensors="pt")
+
+    prompt = gen_tok.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False
+    )
+
+    # Tokenizar el prompt
+    inputs = gen_tok(
+        prompt,
+        return_tensors="pt"
+    )
     inputs = {k: v.to(gen_model.device) for k, v in inputs.items()}
 
     pad_id = gen_tok.pad_token_id
     if pad_id is None and gen_tok.eos_token_id is not None:
         pad_id = gen_tok.eos_token_id
 
+    # Generar dos candidatos con diferentes seeds para mayor diversidad
+    torch.manual_seed(random.randint(0, 10000))
     out1 = gen_model.generate(
         **inputs,
         do_sample=True,
@@ -200,7 +292,10 @@ def generate_two_candidates(
         temperature=temperature,
         top_p=top_p,
         pad_token_id=pad_id,
+        repetition_penalty=1.6,  # Añadir repetition_penalty como en tu ejemplo
     )
+
+    torch.manual_seed(random.randint(0, 10000))
     out2 = gen_model.generate(
         **inputs,
         do_sample=True,
@@ -208,184 +303,177 @@ def generate_two_candidates(
         temperature=temperature,
         top_p=top_p,
         pad_token_id=pad_id,
+        repetition_penalty=1.6,  # Añadir repetition_penalty como en tu ejemplo
     )
 
     gen_start = inputs["input_ids"].shape[1]
     txt1 = gen_tok.decode(out1[0][gen_start:], skip_special_tokens=True).strip()
     txt2 = gen_tok.decode(out2[0][gen_start:], skip_special_tokens=True).strip()
-    return txt1, txt2
+
+    return prompt, txt1, txt2
 
 
-def build_preference_dataset(
-    raw_ds: DatasetDict, gen_model_name: str, trust_remote_code: bool = True
-) -> DatasetDict:
+def build_preference_dataset(raw_ds: DatasetDict, gen_model_name: str, output_dir: str,
+                             trust_remote_code: bool = True) -> DatasetDict:
     """
-    Construye un nuevo DatasetDict con columnas 'chosen' y 'rejected' a partir
-    de un DatasetDict original. Para cada ejemplo se generan dos poemas y se
-    selecciona el mejor según ``score_poem``.
-
-    Args:
-        raw_ds: DatasetDict original con columnas 'id', 'conversations' y
-            'structure'.
-        gen_model_name: Nombre del modelo generativo a usar para producir
-            candidatos.
-        trust_remote_code: Permitir código remoto al cargar el modelo generativo.
-
-    Returns:
-        DatasetDict con los mismos splits que ``raw_ds`` pero con columnas
-        'chosen' y 'rejected'.
+    Construir dataset de preferencias usando evaluación métrica avanzada
     """
+    # Configurar logging
+    log_file = setup_logging(output_dir)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     gen_tok = AutoTokenizer.from_pretrained(gen_model_name, trust_remote_code=trust_remote_code, use_fast=True)
-    # Cargar modelo generativo (causal) para producir poemas. Usamos
-    # AutoModelForCausalLM para que ``generate`` funcione correctamente.
-    gen_model = AutoModelForCausalLM.from_pretrained(
-        gen_model_name, trust_remote_code=trust_remote_code
-    ).to(device)
+    gen_model = AutoModelForCausalLM.from_pretrained(gen_model_name, trust_remote_code=trust_remote_code).to(device)
 
-    # Ajustar plantilla de chat
+    # Alinear plantilla de chat si no existe
     if gen_tok.chat_template is None:
         gen_model, gen_tok = setup_chat_format(gen_model, gen_tok)
 
-    def map_fn(example: Dict[str, Any]) -> Dict[str, str]:
-        cand1, cand2 = generate_two_candidates(example, gen_model, gen_tok)
-        sc1 = score_poem(cand1, example.get("structure") or [])
-        sc2 = score_poem(cand2, example.get("structure") or [])
-        # Desempate aleatorio si empatan
-        if sc1 == sc2:
-            if random.random() < 0.5:
-                sc1 += 1e-6
+    step_counter = 0
+
+    def map_fn(example):
+        nonlocal step_counter
+        step_counter += 1
+
+        try:
+            prompt, cand1, cand2 = generate_two_candidates(example, gen_model, gen_tok)
+            structure = example.get("structure", [])
+
+            sc1 = score_poem_advanced(cand1, structure)
+            sc2 = score_poem_advanced(cand2, structure)
+
+            # Desempate con pequeña aleatoriedad
+            if abs(sc1 - sc2) < 1e-6:
+                if random.random() < 0.5:
+                    sc1 += 1e-6
+                else:
+                    sc2 += 1e-6
+
+            if sc1 > sc2:
+                chosen, rejected = cand1, cand2
+                score_diff = sc1 - sc2
             else:
-                sc2 += 1e-6
-        if sc1 > sc2:
-            chosen, rejected = cand1, cand2
-        else:
-            chosen, rejected = cand2, cand1
-        return {"chosen": chosen, "rejected": rejected}
+                chosen, rejected = cand2, cand1
+                score_diff = sc2 - sc1
+
+            print(f"Step {step_counter} - Scores: {sc1:.2f} vs {sc2:.2f} (diff: {score_diff:.2f})")
+
+            # Log detallado
+            log_training_step(
+                log_file, step_counter, example, prompt,
+                cand1, cand2, sc1, sc2, chosen, rejected, structure
+            )
+
+            return {"chosen": chosen, "rejected": rejected}
+
+        except Exception as e:
+            print(f"Error processing example: {e}")
+            # Log del error
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\nERROR en step {step_counter}: {str(e)}\n")
+
+            # Fallback en caso de error
+            return {"chosen": "Error en generación", "rejected": "Error en generación"}
 
     out = {}
     for split in raw_ds.keys():
+        print(f"Processing split: {split}")
         cols = raw_ds[split].column_names
         out[split] = raw_ds[split].map(map_fn, remove_columns=cols)
+
+    # Log final
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"\n{'=' * 80}\n")
+        f.write(f"TRAINING COMPLETED - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Total steps processed: {step_counter}\n")
+        f.write(f"{'=' * 80}\n")
+
     return DatasetDict(out)
 
 
 if __name__ == "__main__":
-    # -------------------------------------------------------------------------
-    # Parámetros fijos para el experimento
-    # -------------------------------------------------------------------------
-    # Nombre del dataset cargado con ``load_from_disk``. Debe contener
-    # 'conversations' y 'structure'.
-    script_args = ScriptArguments(dataset_name="poemas_GalicIA_est", dataset_config=None)
+    # -----------------------------
+    # Configuración
+    # -----------------------------
+    script_args = ScriptArguments(
+        dataset_name="poemas_GalicIA_est",
+        dataset_config=None,
+    )
 
-    # Configuración de entrenamiento para RewardTrainer. Se utilizan pocos pasos
-    # y un tamaño de lote reducido para esta prueba de concepto.
     training_args = RewardConfig(
-        output_dir="galicIA-v1-ref",
-        per_device_train_batch_size=4,
+        output_dir="galicIA-v1-ref-advanced",
+        per_device_train_batch_size=4,  # Reducido para mayor estabilidad
         num_train_epochs=1,
         gradient_checkpointing=True,
-        learning_rate=1.0e-4,
+        learning_rate=5.0e-5,  # Learning rate más conservativo
         eval_strategy="steps",
-        eval_steps=20,
+        eval_steps=100,
         max_length=512,
         report_to=None,
         logging_strategy="steps",
-        logging_steps=10,
+        logging_steps=20,
         save_strategy="steps",
-        save_steps=20,
+        save_steps=100,
+        warmup_steps=50,  # Añadir warmup
     )
-    # Evitar advertencia de PyTorch con checkpointing reentrante
     training_args.gradient_checkpointing_kwargs = dict(use_reentrant=False)
 
-    # -------------------------------------------------------------------------
-    # Configuración del adaptador LoRA preexistente
-    # -------------------------------------------------------------------------
-    # Los siguientes valores se extrajeron del ``adapter_config.json`` de
-    # ``pajon1/galicIA-v1``【642958274612479†L56-L124】. Mantener estos valores permite
-    # continuar entrenando el mismo adaptador en una tarea diferente (SEQ_CLS).
-    LORA_TARGET_MODULES = [
-        "down_proj",
-        "k_proj",
-        "up_proj",
-        "gate_proj",
-        "q_proj",
-        "o_proj",
-        "v_proj",
-    ]
-    LORA_R = 700
-    LORA_ALPHA = 1400
-    LORA_DROPOUT = 0.0
-
-    # Ruta del adaptador LoRA a cargar y ruta del modelo base original
-    ADAPTER_NAME = "pajon1/galicIA-v1"
-    BASE_MODEL_NAME = "unsloth/Qwen3-0.6B"
-
-    # Creamos un ModelConfig con LoRA activado y parámetros del adaptador
     model_args = ModelConfig(
-        model_name_or_path=ADAPTER_NAME,
+        model_name_or_path="pajon1/galicIA-v1",
         trust_remote_code=True,
         torch_dtype="auto",
-        use_peft=True,
-        lora_r=LORA_R,
-        lora_alpha=LORA_ALPHA,
-        lora_dropout=LORA_DROPOUT,
-        lora_target_modules=LORA_TARGET_MODULES,
+        use_peft=False,
+        lora_r=700,
+        lora_alpha=1400,
+        lora_dropout=0.05,  # Añadir algo de dropout
         lora_task_type="SEQ_CLS",
     )
 
-    # -------------------------------------------------------------------------
-    # Carga del modelo base y del adaptador LoRA
-    # -------------------------------------------------------------------------
-    # Configuración de cuantización y distribución del modelo
+    # -----------------------------
+    # Modelo y Tokenizer
+    # -----------------------------
+    torch_dtype = (
+        model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
+    )
     quantization_config = get_quantization_config(model_args)
-    device_map = get_kbit_device_map() if quantization_config is not None else None
     model_kwargs = dict(
         revision=model_args.model_revision,
-        device_map=device_map,
+        device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
         use_cache=False if training_args.gradient_checkpointing else True,
-        torch_dtype=(
-            getattr(torch, model_args.torch_dtype)
-            if isinstance(model_args.torch_dtype, str) and model_args.torch_dtype not in ["auto", None]
-            else None
-        ),
+        torch_dtype=torch_dtype,
     )
 
-    # Tokenizador y modelo base de clasificación
     tokenizer = AutoTokenizer.from_pretrained(
-        BASE_MODEL_NAME, trust_remote_code=model_args.trust_remote_code, use_fast=True
+        model_args.model_name_or_path, trust_remote_code=model_args.trust_remote_code, use_fast=True
     )
-    base_model = AutoModelForSequenceClassification.from_pretrained(
-        BASE_MODEL_NAME, num_labels=1, trust_remote_code=model_args.trust_remote_code, **model_kwargs
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_args.model_name_or_path, num_labels=1, trust_remote_code=model_args.trust_remote_code, **model_kwargs
     )
 
-    # Alinear token de relleno
+    # Alinear padding tokens
     if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
-    base_model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
 
-    # Añadir plantilla de chat si fuera necesario
+    # Plantilla de chat
     if tokenizer.chat_template is None:
-        base_model, tokenizer = setup_chat_format(base_model, tokenizer)
+        model, tokenizer = setup_chat_format(model, tokenizer)
 
-    # Convertir el modelo base en un modelo PEFT cargando el adaptador
-    # Se especifica ``is_trainable=True`` para que las matrices LoRA puedan
-    # actualizarse durante el entrenamiento.
-    model = PeftModel.from_pretrained(base_model, ADAPTER_NAME, is_trainable=True)
-
-    # -------------------------------------------------------------------------
-    # Carga y preparación del dataset
-    # -------------------------------------------------------------------------
+    # -----------------------------
+    # Dataset
+    # -----------------------------
     raw_dataset = load_from_disk(script_args.dataset_name)
-    # Usamos una fracción muy pequeña para pruebas rápidas
-    sample_size = max(1, int(0.00005 * len(raw_dataset)))
-    raw_dataset = raw_dataset.shuffle(seed=42).select(range(sample_size))
+    # Usar una muestra más pequeña para pruebas (0.005% del dataset)
+    sample_size = int(0.00005 * len(raw_dataset))
+    raw_dataset = raw_dataset.shuffle(seed=42).select(range(min(sample_size, 100)))  # Max 100 ejemplos para pruebas
 
-    # Normalizar a un DatasetDict con splits 'train' y 'test'
+    print(f"Using {len(raw_dataset)} examples for training")
+
+    # Normalizar a DatasetDict
     if isinstance(raw_dataset, Dataset):
         if training_args.eval_strategy != "no":
-            tmp = raw_dataset.train_test_split(test_size=0.1, seed=42)
+            tmp = raw_dataset.train_test_split(test_size=0.2, seed=42)  # 20% para eval
             raw_dataset = DatasetDict(train=tmp["train"], test=tmp["test"])
             script_args.dataset_train_split = "train"
             script_args.dataset_test_split = "test"
@@ -393,54 +481,55 @@ if __name__ == "__main__":
             raw_dataset = DatasetDict(train=raw_dataset)
             script_args.dataset_train_split = "train"
             script_args.dataset_test_split = None
-    else:
-        # Asegurarse de que existen los splits requeridos
-        if training_args.eval_strategy != "no" and script_args.dataset_test_split not in raw_dataset:
-            tmp = raw_dataset[script_args.dataset_train_split].train_test_split(test_size=0.1, seed=42)
-            raw_dataset = DatasetDict(train=tmp["train"], test=tmp["test"])
-            script_args.dataset_train_split = "train"
-            script_args.dataset_test_split = "test"
 
-    # Construir dataset de preferencias si es necesario
+    # Construir dataset de preferencias
     train_cols = set(raw_dataset[script_args.dataset_train_split].column_names)
-    if not {"chosen", "rejected"}.issubset(train_cols):
+    needs_prefs = not {"chosen", "rejected"}.issubset(train_cols)
+
+    if needs_prefs:
+        print("Building preference dataset with advanced metric evaluation...")
         pref_ds = build_preference_dataset(
             raw_dataset,
-            gen_model_name=ADAPTER_NAME,
+            gen_model_name=model_args.model_name_or_path,
+            output_dir=training_args.output_dir,
             trust_remote_code=model_args.trust_remote_code,
         )
         dataset = pref_ds
     else:
         dataset = raw_dataset
 
-    # Preparar dataset de evaluación si corresponde
+    # Preparar eval_dataset
     eval_ds = None
     if training_args.eval_strategy != "no" and script_args.dataset_test_split is not None:
         if script_args.dataset_test_split in dataset:
             eval_ds = dataset[script_args.dataset_test_split]
 
-    # -------------------------------------------------------------------------
-    # Entrenamiento con RewardTrainer
-    # -------------------------------------------------------------------------
+    # -----------------------------
+    # Entrenamiento
+    # -----------------------------
     trainer = RewardTrainer(
         model=model,
         processing_class=tokenizer,
         args=training_args,
         train_dataset=dataset[script_args.dataset_train_split],
         eval_dataset=eval_ds,
-        # No pasamos ``peft_config`` porque el modelo ya es un PeftModel
+        peft_config=get_peft_config(model_args),
     )
+
+    print("Starting training...")
     trainer.train()
 
-    # Guardar el modelo entrenado
+    # -----------------------------
+    # Guardado y evaluación
+    # -----------------------------
     trainer.save_model(training_args.output_dir)
+    print(f"Model saved to {training_args.output_dir}")
 
-    # Evaluar y registrar métricas si hay conjunto de validación
     if training_args.eval_strategy != "no" and eval_ds is not None:
         metrics = trainer.evaluate()
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
+        print("Evaluation metrics:", metrics)
 
-    # Subir al Hub opcionalmente si se habilita ``push_to_hub`` en RewardConfig
     if training_args.push_to_hub:
         trainer.push_to_hub(dataset_name=script_args.dataset_name)
