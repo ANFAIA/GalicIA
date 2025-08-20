@@ -32,7 +32,7 @@ print(raw_ds)
 
 # 2) Cargar modelo y tokenizer (base)
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Qwen3-0.6B",
+    model_name="unsloth/Qwen3-1.7B",
     max_seq_length=512,
     load_in_4bit=False,
     load_in_8bit=False,
@@ -114,11 +114,12 @@ model = PeftModel.from_pretrained(
     is_trainable=False,   # lang congelado
 )
 model = model.merge_and_unload()
+r_config=80
 
 # 5c) Añadir LoRA de tarea NUEVO (entrenable) sobre el base ya fusionado
 task_cfg = LoraConfig(
-    r=250,
-    lora_alpha=500,
+    r=r_config,
+    lora_alpha=r_config*2,
     lora_dropout=0,
     target_modules=["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"],
     task_type="CAUSAL_LM",

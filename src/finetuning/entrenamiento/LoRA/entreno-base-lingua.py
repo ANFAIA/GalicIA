@@ -101,7 +101,7 @@ ds_formatted = raw_ds.map(formatting_prompts_func, batched=True, remove_columns=
 print(ds_formatted)
 print(ds_formatted[0])
 
-r_config=60
+r_config=120
 # 5) Envolver en PEFT/LoRA
 model = FastLanguageModel.get_peft_model(
     model,

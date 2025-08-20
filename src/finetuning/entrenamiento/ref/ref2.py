@@ -401,7 +401,7 @@ if __name__ == "__main__":
     )
 
     training_args = RewardConfig(
-        output_dir="galicIA-v1-ref-advanced",
+        output_dir="galicIA-v1-ref",
         per_device_train_batch_size=4,  # Reducido para mayor estabilidad
         num_train_epochs=1,
         gradient_checkpointing=True,
@@ -419,7 +419,7 @@ if __name__ == "__main__":
     training_args.gradient_checkpointing_kwargs = dict(use_reentrant=False)
 
     model_args = ModelConfig(
-        model_name_or_path="pajon1/galicIA-v1",
+        model_name_or_path="galicIA-full-FIM",
         trust_remote_code=True,
         torch_dtype="auto",
         use_peft=False,
@@ -464,9 +464,9 @@ if __name__ == "__main__":
     # Dataset
     # -----------------------------
     raw_dataset = load_from_disk(script_args.dataset_name)
-    # Usar una muestra más pequeña para pruebas (0.005% del dataset)
-    sample_size = int(0.00005 * len(raw_dataset))
-    raw_dataset = raw_dataset.shuffle(seed=42).select(range(min(sample_size, 100)))  # Max 100 ejemplos para pruebas
+    # Usar una muestra más pequeña para pruebas (5% del dataset)
+    sample_size = int(0.05 * len(raw_dataset))
+    raw_dataset = raw_dataset.shuffle(seed=42).select(range(min(sample_size, 10000)))  # Max 10000 ejemplos para pruebas
 
     print(f"Using {len(raw_dataset)} examples for training")
 
