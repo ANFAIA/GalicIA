@@ -1,327 +1,488 @@
 import random
 import torch
-from typing import Dict, Any
+import json
+import os
+from datetime import datetime
+from typing import Dict, Any, List, Tuple
 
 from datasets import load_from_disk, Dataset, DatasetDict
 from transformers import (
-    AutoModelForSequenceClassification,
     AutoModelForCausalLM,
     AutoTokenizer,
+    TrainingArguments,
 )
 from trl import (
-    ModelConfig,
-    RewardConfig,
-    RewardTrainer,
-    ScriptArguments,
-    get_kbit_device_map,
-    get_peft_config,
-    get_quantization_config,
+    DPOTrainer,
+    DPOConfig,
     setup_chat_format,
 )
 
-# ------------------------------------------------------------
-# Utilidades mínimas para construir preferencias (heurístico)
-# ------------------------------------------------------------
-VOWELS = set("aeiouáéíóúàèìòùâêîôûäëïöüAEIOUÁÉÍÓÚÂÊÎÔÛÄËÏÖÜ")
+# Importar las funciones de evaluación métrica
+from src.extractor_métrica.procesar_poema import rango_silabas, rima_consonante, rima_asonante
 
-def approx_syllables(word: str) -> int:
-    # Heurística simple: contar grupos vocálicos (no exacto, pero estable)
-    if not word:
-        return 0
-    prev_vowel = False
-    count = 0
-    for ch in word:
-        is_vowel = ch in VOWELS
-        if is_vowel and not prev_vowel:
-            count += 1
-        prev_vowel = is_vowel
-    return max(count, 1)
 
-def approx_line_syllables(line: str) -> int:
-    return sum(approx_syllables(w) for w in line.strip().split())
+# ==========================================
+# FUNCIONES DE EVALUACIÓN MÉTRICA
+# ==========================================
 
-def rhyme_key(line: str) -> str:
-    # Clave de rima muy simple: últimas 3 letras alfanuméricas del último token
-    tokens = [t for t in ''.join(ch if ch.isalnum() else ' ' for ch in line.lower()).split() if t]
-    if not tokens:
+def extract_syllable_count(verso: str) -> int:
+    """Extraer número de sílabas de un verso"""
+    mn, mx = rango_silabas(verso)
+    return min,mx
+
+
+def extract_rhyme_pattern(verso: str, rhyme_type: str = "asonante") -> str:
+    """Extraer patrón de rima de un verso"""
+    if not verso.strip():
         return ""
-    last = tokens[-1]
-    return last[-3:] if len(last) >= 3 else last
 
-def score_poem(text: str, structure) -> float:
+    last_word = verso.split()[-1] if verso.split() else ""
+    if not last_word:
+        return ""
+
+    if rhyme_type == "consonante":
+        return rima_consonante(last_word)
+    else:
+        return rima_asonante(last_word)
+
+
+def score_poem(text: str, structure: List[Dict]) -> float:
     """
-    text: poema completo (con saltos de línea).
-    structure: lista de estrofas; cada una con {'syllables': [7,5], 'rhyme': ['A','B']} etc.
-    Recompensa = ajuste de sílabas - penalizaciones por desviación de rima/formato.
+    Función simplificada de puntuación para evaluar poemas.
+    Mayor puntuación = mejor adherencia a la estructura.
     """
-    stanzas = [s for s in text.strip().split("\n\n") if s.strip()]
-    target_stanzas = len(structure)
-    score = -abs(len(stanzas) - target_stanzas) * 1.0
+    if not text.strip():
+        return -10.0
 
-    for i, st in enumerate(stanzas[:target_stanzas]):
-        lines = [l for l in st.strip().split("\n") if l.strip()]
-        target_syllables = structure[i].get("syllables", [])
-        target_rhymes = structure[i].get("rhyme", [])
-        score -= abs(len(lines) - len(target_syllables)) * 0.5
+    if not structure or not isinstance(structure, list):
+        return 0.0
 
-        rhyme_map = {}
-        for j, line in enumerate(lines[:len(target_syllables)]):
-            syl = approx_line_syllables(line)
-            score -= abs(syl - target_syllables[j]) * 0.2  # tolerante
-            if j < len(target_rhymes):
-                lab = target_rhymes[j]
-                rhyme_map.setdefault(lab, []).append(rhyme_key(line))
+    score = 0.0
+    stanzas = [s.strip() for s in text.strip().split("\n\n") if s.strip()]
 
-        for lab, keys in rhyme_map.items():
-            if len(keys) > 1:
-                base = keys[0]
-                mismatches = sum(1 for k in keys[1:] if k != base)
-                score -= mismatches * 0.5
+    # Bonus/penalización por número correcto de estrofas
+    expected_stanzas = len(structure)
+    score -= abs(len(stanzas) - expected_stanzas) * 2.0
 
-    # Bonus pequeño por vocabulario común en gl
-    if any(tok in text.lower() for tok in ["non", "que", "coa", "noite", "lúa", "auga", "terra", "vento"]):
-        score += 0.3
+    # Evaluar cada estrofa
+    for i, stanza in enumerate(stanzas[:expected_stanzas]):
+        if i >= len(structure):
+            break
+
+        lines = [line.strip() for line in stanza.split("\n") if line.strip()]
+        expected_syllables = structure[i].get("syllables", [])
+        expected_rhymes = structure[i].get("rhyme", [])
+
+        # Validar estructura
+        if expected_syllables:
+            expected_syllables = [s for s in expected_syllables
+                                  if s is not None and isinstance(s, (int, float))]
+        if expected_rhymes:
+            expected_rhymes = [r for r in expected_rhymes
+                               if r is not None and isinstance(r, str)]
+
+        # Penalización por número incorrecto de versos
+        if expected_syllables:
+            score -= abs(len(lines) - len(expected_syllables)) * 1.5
+
+        # Evaluar cada verso
+        rhyme_groups = {}
+        for j, line in enumerate(lines):
+            if not line.strip():
+                score -= 1.0
+                continue
+
+            # Evaluar sílabas
+            if j < len(expected_syllables):
+                try:
+                    min_sil,max_sil = extract_syllable_count(line)
+                    expected_syl = expected_syllables[j]
+                    actual_syllables=-1
+                    if min_sil>expected_syl:
+                        actual_syllables=min_sil
+                    if max_sil<expected_syl:
+                        actual_syllables=max_sil
+                    if min_sil < expected_syl < max_sil:
+                        actual_syllables=expected_syllables
+                    syllable_diff = abs(actual_syllables - expected_syl)
+
+                    if syllable_diff == 0:
+                        score += 2.0  # Bonus por exactitud
+                    elif syllable_diff <= 1:
+                        score += 0.5  # Pequeño bonus por estar cerca
+                    else:
+                        score -= syllable_diff * 0.5
+                except:
+                    score -= 0.5
+
+            # Recopilar rimas para evaluación posterior
+            if j < len(expected_rhymes) and expected_rhymes[j]:
+                rhyme_label = expected_rhymes[j]
+                try:
+                    rhyme_pattern = extract_rhyme_pattern(line, "asonante")
+                    if rhyme_label not in rhyme_groups:
+                        rhyme_groups[rhyme_label] = []
+                    rhyme_groups[rhyme_label].append(rhyme_pattern)
+                except:
+                    pass
+
+        # Evaluar consistencia de rimas
+        for rhyme_label, patterns in rhyme_groups.items():
+            if len(patterns) <= 1:
+                continue
+            unique_patterns = set(p for p in patterns if p)
+            if len(unique_patterns) == 1:
+                score += len(patterns) * 1.0  # Bonus por rima consistente
+            else:
+                score -= (len(unique_patterns) - 1) * 0.5
+
     return float(score)
 
-def messages_from_example(ex: Dict[str, Any], tokenizer):
-    """
-    Construye mensajes de chat a partir del ejemplo de tu dataset:
-    {
-      'conversations': {'role': ['user'], 'content': ['...']},
-      'structure': [...]
-    }
-    """
-    user_prompt = ex["conversations"]["content"][0]
-    structure_hint = ""
-    try:
-        patt = ex.get("structure") or []
-        patt_str = "; ".join(
-            f"{'/'.join(map(str, p.get('syllables', [])))} con rima {''.join(p.get('rhyme', []))}"
-            for p in patt
+
+# ==========================================
+# GENERACIÓN DE DATASET DE PREFERENCIAS
+# ==========================================
+
+def generate_candidates(
+        prompt: str,
+        model,
+        tokenizer,
+        num_candidates: int = 4,
+        max_new_tokens: int = 150,
+        temperature: float = 0.9,
+        top_p: float = 0.95
+) -> List[str]:
+    """Generar múltiples candidatos para un prompt"""
+
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    candidates = []
+    for i in range(num_candidates):
+        torch.manual_seed(random.randint(0, 100000))
+
+        outputs = model.generate(
+            **inputs,
+            do_sample=True,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=1.2,
+            pad_token_id=tokenizer.pad_token_id,
         )
-        if patt_str:
-            structure_hint = f"\n\nSegue esta estrutura: {patt_str}. Escribe en galego."
-    except Exception:
-        pass
 
-    messages = [
-        {"role": "user", "content": user_prompt + structure_hint}
-    ]
-    return messages
+        generated_text = tokenizer.decode(
+            outputs[0][inputs["input_ids"].shape[1]:],
+            skip_special_tokens=True
+        ).strip()
 
-def generate_two_candidates(ex, gen_model, gen_tok, max_new_tokens=180, temperature=0.9, top_p=0.95):
-    messages = messages_from_example(ex, gen_tok)
-    prompt = gen_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    inputs = gen_tok(prompt, return_tensors="pt")
-    inputs = {k: v.to(gen_model.device) for k, v in inputs.items()}
+        candidates.append(generated_text)
 
-    pad_id = gen_tok.pad_token_id
-    if pad_id is None and gen_tok.eos_token_id is not None:
-        pad_id = gen_tok.eos_token_id
+    return candidates
 
-    out1 = gen_model.generate(
-        **inputs,
-        do_sample=True,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_p=top_p,
-        pad_token_id=pad_id,
-    )
-    out2 = gen_model.generate(
-        **inputs,
-        do_sample=True,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_p=top_p,
-        pad_token_id=pad_id,
-    )
 
-    gen_start = inputs["input_ids"].shape[1]
-    txt1 = gen_tok.decode(out1[0][gen_start:], skip_special_tokens=True).strip()
-    txt2 = gen_tok.decode(out2[0][gen_start:], skip_special_tokens=True).strip()
-    return txt1, txt2
-
-def build_preference_dataset(raw_ds: DatasetDict, gen_model_name: str, trust_remote_code: bool = True) -> DatasetDict:
+def create_preference_dataset(
+        dataset: Dataset,
+        model_name: str,
+        num_candidates: int = 4,
+        sample_size: int = None
+) -> Dataset:
     """
-    Toma tu DatasetDict con columnas:
-      - id
-      - conversations: {'role': [...], 'content': [...]}
-      - structure: [...]
-    y devuelve un DatasetDict con columnas:
-      - chosen
-      - rejected
-    usando una heurística de recompensa sobre estructura/rima/sílabas.
+    Crear dataset de preferencias generando y evaluando candidatos.
+    Genera múltiples candidatos y selecciona el mejor/peor para mayor señal de aprendizaje.
     """
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    gen_tok = AutoTokenizer.from_pretrained(gen_model_name, trust_remote_code=trust_remote_code, use_fast=True)
-    gen_model = AutoModelForCausalLM.from_pretrained(gen_model_name, trust_remote_code=trust_remote_code).to(device)
+    print(f"Using device: {device}")
 
-    # Alinear plantilla de chat si no existe
-    if gen_tok.chat_template is None:
-        gen_model, gen_tok = setup_chat_format(gen_model, gen_tok)
-
-    def map_fn(example):
-        cand1, cand2 = generate_two_candidates(example, gen_model, gen_tok)
-        sc1 = score_poem(cand1, example.get("structure") or [])
-        sc2 = score_poem(cand2, example.get("structure") or [])
-        if sc1 == sc2:
-            # desempate aleatorio suave
-            if random.random() < 0.5:
-                sc1 += 1e-6
-            else:
-                sc2 += 1e-6
-        if sc1 > sc2:
-            chosen, rejected = cand1, cand2
-        else:
-            chosen, rejected = cand2, cand1
-        return {"chosen": chosen, "rejected": rejected}
-
-    out = {}
-    for split in raw_ds.keys():
-        cols = raw_ds[split].column_names
-        out[split] = raw_ds[split].map(map_fn, remove_columns=cols)
-    return DatasetDict(out)
-
-if __name__ == "__main__":
-    # -----------------------------
-    # Configuración fija (sin CLI)
-    # -----------------------------
-    script_args = ScriptArguments(
-        dataset_name="poemas_GalicIA_est",
-        dataset_config=None,
+    # Cargar modelo y tokenizer para generación
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+        device_map="auto" if device == "cuda" else None,
+        trust_remote_code=True
     )
 
-    training_args = RewardConfig(
-        output_dir="galicIA-v1-ref",
-        per_device_train_batch_size=8,
-        num_train_epochs=1,
-        gradient_checkpointing=True,
-        learning_rate=1.0e-4,
-        eval_strategy="steps",
-        eval_steps=50,
-        max_length=512,
-        report_to=None,
-        logging_strategy="steps",
-        logging_steps=10,
-        save_strategy="steps",
-        save_steps=50,
-    )
-    # Evitar warning de PyTorch reentrant con checkpointing
-    training_args.gradient_checkpointing_kwargs = dict(use_reentrant=False)
-
-    model_args = ModelConfig(
-        model_name_or_path="pajon1/galicIA-v1",
-        trust_remote_code=True,
-        torch_dtype="auto",
-        # Forzamos LoRA dentro del código:
-        use_peft=False,
-        lora_r=700,
-        lora_alpha=1400,
-        lora_dropout=0.0,
-        lora_task_type="SEQ_CLS",  # IMPORTANTE para reward modeling
-        # load_in_4bit=True,
-    )
-
-    # -----------------------------
-    # Modelo y Tokenizer (reward)
-    # -----------------------------
-    torch_dtype = (
-        model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
-    )
-    quantization_config = get_quantization_config(model_args)
-    model_kwargs = dict(
-        revision=model_args.model_revision,
-        device_map=get_kbit_device_map() if quantization_config is not None else None,
-        quantization_config=quantization_config,
-        use_cache=False if training_args.gradient_checkpointing else True,
-        torch_dtype=torch_dtype,
-
-    )
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_args.model_name_or_path, trust_remote_code=model_args.trust_remote_code, use_fast=True
-    )
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_args.model_name_or_path, num_labels=1, trust_remote_code=model_args.trust_remote_code, **model_kwargs
-    )
-    # Alinear padding tokens
-    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-    model.config.pad_token_id = tokenizer.pad_token_id
-
-    # Si el modelo base no trae plantilla de chat, aplicar ChatML por defecto
+    # Configurar chat template si es necesario
     if tokenizer.chat_template is None:
         model, tokenizer = setup_chat_format(model, tokenizer)
 
-    # -----------------------------
-    # Dataset
-    # -----------------------------
-    raw_dataset = load_from_disk(script_args.dataset_name)
-    # Cargar solo el 10% de forma aleatoria
-    raw_dataset = raw_dataset.shuffle(seed=42).select(range(int(0.00005 * len(raw_dataset))))
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Normalizar a DatasetDict con 'train' y opcionalmente 'test'
-    if isinstance(raw_dataset, Dataset):
-        if training_args.eval_strategy != "no":
-            tmp = raw_dataset.train_test_split(test_size=0.1, seed=42)
-            raw_dataset = DatasetDict(train=tmp["train"], test=tmp["test"])
-            script_args.dataset_train_split = "train"
-            script_args.dataset_test_split = "test"
-        else:
-            raw_dataset = DatasetDict(train=raw_dataset)
-            script_args.dataset_train_split = "train"
-            script_args.dataset_test_split = None
-    else:
-        # Ya es DatasetDict; aseguramos que existen los splits requeridos
-        if training_args.eval_strategy != "no" and script_args.dataset_test_split not in raw_dataset:
-            # Si no hay test, crear uno 10%
-            tmp = raw_dataset[script_args.dataset_train_split].train_test_split(test_size=0.1, seed=42)
-            raw_dataset = DatasetDict(train=tmp["train"], test=tmp["test"])
-            script_args.dataset_train_split = "train"
-            script_args.dataset_test_split = "test"
+    # Limitar tamaño del dataset si se especifica
+    if sample_size:
+        dataset = dataset.shuffle(seed=42).select(range(min(sample_size, len(dataset))))
 
-    # Si el dataset NO trae columnas 'chosen'/'rejected', construimos preferencias on-the-fly
-    train_cols = set(raw_dataset[script_args.dataset_train_split].column_names)
-    needs_prefs = not {"chosen", "rejected"}.issubset(train_cols)
-    if needs_prefs:
-        pref_ds = build_preference_dataset(
-            raw_dataset,
-            gen_model_name=model_args.model_name_or_path,
-            trust_remote_code=model_args.trust_remote_code,
-        )
-        dataset = pref_ds
-    else:
-        dataset = raw_dataset
+    preference_data = []
 
-    # Preparar eval_dataset de forma segura
-    eval_ds = None
-    if training_args.eval_strategy != "no" and script_args.dataset_test_split is not None:
-        if script_args.dataset_test_split in dataset:
-            eval_ds = dataset[script_args.dataset_test_split]
+    for idx, example in enumerate(dataset):
+        print(f"Processing example {idx + 1}/{len(dataset)}")
 
-    # -----------------------------
-    # Entrenamiento
-    # -----------------------------
-    trainer = RewardTrainer(
-        model=model,
-        processing_class=tokenizer,
-        args=training_args,
-        train_dataset=dataset[script_args.dataset_train_split],
-        eval_dataset=eval_ds,
-        peft_config=get_peft_config(model_args),
+        try:
+            # Obtener el prompt del usuario
+            user_prompt = example["conversations"]["content"][0]
+            structure = example.get("structure", [])
+
+            # Crear prompt con formato de chat
+            messages = [{"role": "user", "content": user_prompt}]
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            # Generar múltiples candidatos
+            candidates = generate_candidates(
+                prompt, model, tokenizer,
+                num_candidates=num_candidates
+            )
+
+            # Evaluar cada candidato
+            scored_candidates = []
+            for candidate in candidates:
+                score = score_poem(candidate, structure)
+                scored_candidates.append((score, candidate))
+
+            # Ordenar por puntuación
+            scored_candidates.sort(key=lambda x: x[0], reverse=True)
+
+            # Seleccionar el mejor y el peor para máximo contraste
+            best_score, best_poem = scored_candidates[0]
+            worst_score, worst_poem = scored_candidates[-1]
+
+            # Solo agregar si hay diferencia significativa
+            if best_score - worst_score > 1.0:
+                preference_data.append({
+                    "prompt": prompt,
+                    "chosen": best_poem,
+                    "rejected": worst_poem,
+                    "score_diff": best_score - worst_score,
+                    "structure": structure
+                })
+
+                print(f"  Score diff: {best_score - worst_score:.2f}")
+            else:
+                print(f"  Skipped: insufficient score difference")
+
+        except Exception as e:
+            print(f"  Error: {e}")
+            continue
+
+    print(f"Created {len(preference_data)} preference pairs from {len(dataset)} examples")
+
+    return Dataset.from_list(preference_data)
+
+
+# ==========================================
+# ENTRENAMIENTO DPO
+# ==========================================
+
+def train_dpo_model(
+        base_model_name: str,
+        dataset_path: str,
+        output_dir: str = "galicia-dpo-model",
+        num_train_epochs: int = 2,
+        per_device_train_batch_size: int = 2,
+        learning_rate: float = 5e-7,
+        beta: float = 0.1,  # Parámetro DPO que controla cuánto desviarse del modelo de referencia
+        max_samples: int = 1000,  # Limitar samples para pruebas
+):
+    """
+    Entrenar modelo con DPO para seguir estructuras métricas.
+
+    DPO es más eficiente que PPO porque:
+    - No necesita un reward model separado
+    - Es más estable en el entrenamiento
+    - Requiere menos memoria
+    - Converge más rápido
+    """
+
+    print("=" * 60)
+    print("INICIANDO ENTRENAMIENTO DPO")
+    print("=" * 60)
+
+    # Cargar dataset
+    print("\n1. Cargando dataset...")
+    raw_dataset = load_from_disk(dataset_path)
+
+    # Crear dataset de preferencias
+    print("\n2. Creando dataset de preferencias...")
+    pref_dataset = create_preference_dataset(
+        raw_dataset,
+        base_model_name,
+        num_candidates=4,  # Generar 4 candidatos por ejemplo
+        sample_size=max_samples
     )
+
+    # Dividir en train/eval
+    print("\n3. Dividiendo dataset...")
+    split = pref_dataset.train_test_split(test_size=0.1, seed=42)
+    train_dataset = split["train"]
+    eval_dataset = split["test"]
+
+    print(f"  Train: {len(train_dataset)} ejemplos")
+    print(f"  Eval: {len(eval_dataset)} ejemplos")
+
+    # Cargar modelo y tokenizer
+    print("\n4. Cargando modelo base...")
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model_name,
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        device_map="auto" if torch.cuda.is_available() else None,
+        trust_remote_code=True,
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model_name,
+        trust_remote_code=True
+    )
+
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    # Configurar argumentos de entrenamiento DPO
+    print("\n5. Configurando entrenamiento...")
+    training_args = DPOConfig(
+        output_dir=output_dir,
+        num_train_epochs=num_train_epochs,
+        per_device_train_batch_size=per_device_train_batch_size,
+        per_device_eval_batch_size=per_device_train_batch_size,
+        gradient_accumulation_steps=4,  # Para simular batch más grande
+        gradient_checkpointing=True,  # Ahorrar memoria
+        learning_rate=learning_rate,
+        beta=beta,  # Parámetro específico de DPO
+        warmup_steps=100,
+        logging_steps=10,
+        eval_strategy="steps",
+        eval_steps=50,
+        save_strategy="steps",
+        save_steps=100,
+        bf16=torch.cuda.is_available(),  # Usar bf16 si hay GPU
+        report_to="none",  # Cambiar a "wandb" si quieres logging
+        remove_unused_columns=False,
+        max_length=512,
+        max_prompt_length=256,
+    )
+
+    # Crear trainer DPO
+    print("\n6. Creando DPO Trainer...")
+    trainer = DPOTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        processing_class=tokenizer,  # Cambiado de 'tokenizer' a 'processing_class'
+        # El modelo de referencia se crea automáticamente como una copia del modelo inicial
+    )
+
+    # Entrenar
+    print("\n7. Iniciando entrenamiento...")
+    print("=" * 60)
     trainer.train()
 
-    # -----------------------------
-    # Guardado y evaluación
-    # -----------------------------
-    trainer.save_model(training_args.output_dir)
+    # Guardar modelo final
+    print("\n8. Guardando modelo...")
+    trainer.save_model(output_dir)
+    tokenizer.save_pretrained(output_dir)
 
-    if training_args.eval_strategy != "no" and eval_ds is not None:
-        metrics = trainer.evaluate()
-        trainer.log_metrics("eval", metrics)
-        trainer.save_metrics("eval", metrics)
+    # Mostrar métricas finales
+    print("\n9. Evaluación final...")
+    metrics = trainer.evaluate()
+    print(f"Métricas finales: {metrics}")
 
-    # Push opcional si configuras push_to_hub=True en RewardConfig:
-    if training_args.push_to_hub:
-        trainer.push_to_hub(dataset_name=script_args.dataset_name)
+    print("\n" + "=" * 60)
+    print(f"ENTRENAMIENTO COMPLETADO")
+    print(f"Modelo guardado en: {output_dir}")
+    print("=" * 60)
+
+    return trainer
+
+
+# ==========================================
+# FUNCIÓN DE INFERENCIA PARA PROBAR
+# ==========================================
+
+def generate_poem_with_structure(
+        model_path: str,
+        prompt: str,
+        structure: List[Dict],
+        temperature: float = 0.7,
+        max_new_tokens: int = 150
+) -> str:
+    """
+    Generar un poema usando el modelo entrenado con DPO.
+    """
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Cargar modelo entrenado
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+        device_map="auto" if device == "cuda" else None,
+        trust_remote_code=True,
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+
+    # Crear prompt con formato de chat
+    messages = [{"role": "user", "content": prompt}]
+    formatted_prompt = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    # Generar
+    inputs = tokenizer(formatted_prompt, return_tensors="pt", truncation=True)
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        do_sample=True,
+        top_p=0.95,
+        repetition_penalty=1.2,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+
+    generated_text = tokenizer.decode(
+        outputs[0][inputs["input_ids"].shape[1]:],
+        skip_special_tokens=True
+    ).strip()
+
+    # Evaluar el poema generado
+    score = score_poem(generated_text, structure)
+
+    print(f"Poema generado (puntuación: {score:.2f}):")
+    print("-" * 40)
+    print(generated_text)
+    print("-" * 40)
+
+    return generated_text
+
+
+# ==========================================
+# MAIN - EJEMPLO DE USO
+# ==========================================
+
+if __name__ == "__main__":
+    # Configuración
+    BASE_MODEL = "galicIA-full-FIM"  # Tu modelo base
+    DATASET_PATH = "poemas_GalicIA_est"  # Tu dataset con estructuras
+    OUTPUT_DIR = "galicia-dpo-structured"  # Donde guardar el modelo entrenado
+
+    # Entrenar modelo con DPO
+    trainer = train_dpo_model(
+        base_model_name=BASE_MODEL,
+        dataset_path=DATASET_PATH,
+        output_dir=OUTPUT_DIR,
+        num_train_epochs=2,
+        per_device_train_batch_size=2,
+        learning_rate=5e-7,
+        beta=0.1,  # Controla cuánto puede desviarse del modelo original
+        max_samples=2,  # Usar 500 ejemplos para entrenamiento rápido
+    )

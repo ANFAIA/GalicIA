@@ -465,7 +465,7 @@ if __name__ == "__main__":
     # -----------------------------
     raw_dataset = load_from_disk(script_args.dataset_name)
     # Usar una muestra más pequeña para pruebas (5% del dataset)
-    sample_size = int(0.05 * len(raw_dataset))
+    sample_size = int(0.0005 * len(raw_dataset))
     raw_dataset = raw_dataset.shuffle(seed=42).select(range(min(sample_size, 10000)))  # Max 10000 ejemplos para pruebas
 
     print(f"Using {len(raw_dataset)} examples for training")
