@@ -25,10 +25,10 @@ from src.extractor_métrica.procesar_poema import rango_silabas, rima_consonante
 # FUNCIONES DE EVALUACIÓN MÉTRICA
 # ==========================================
 
-def extract_syllable_count(verso: str) -> int:
+def extract_syllable_count(verso: str) -> Tuple[int, int]:
     """Extraer número de sílabas de un verso"""
     mn, mx = rango_silabas(verso)
-    return min,mx
+    return mn,mx
 
 
 def extract_rhyme_pattern(verso: str, rhyme_type: str = "asonante") -> str:
