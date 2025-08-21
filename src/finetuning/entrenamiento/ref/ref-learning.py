@@ -1,15 +1,11 @@
 import random
 import torch
-import json
-import os
-from datetime import datetime
-from typing import Dict, Any, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
-from datasets import load_from_disk, Dataset, DatasetDict
+from datasets import load_from_disk, Dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    TrainingArguments,
 )
 from trl import (
     DPOTrainer,
@@ -26,9 +22,13 @@ from src.extractor_métrica.procesar_poema import rango_silabas, rima_consonante
 # ==========================================
 
 def extract_syllable_count(verso: str) -> Tuple[int, int]:
-    """Extraer número de sílabas de un verso"""
-    mn, mx = rango_silabas(verso)
-    return mn,mx
+    """Extraer rango de número de sílabas de un verso"""
+    try:
+        mn, mx = rango_silabas(verso)
+        return mn, mx
+    except Exception as e:
+        print(f"Error calculating syllables for '{verso}': {e}")
+        return 0, 0
 
 
 def extract_rhyme_pattern(verso: str, rhyme_type: str = "asonante") -> str:
@@ -36,19 +36,27 @@ def extract_rhyme_pattern(verso: str, rhyme_type: str = "asonante") -> str:
     if not verso.strip():
         return ""
 
-    last_word = verso.split()[-1] if verso.split() else ""
+    words = verso.split()
+    if not words:
+        return ""
+
+    last_word = words[-1].rstrip('.,!?;:')  # Remove punctuation
     if not last_word:
         return ""
 
-    if rhyme_type == "consonante":
-        return rima_consonante(last_word)
-    else:
-        return rima_asonante(last_word)
+    try:
+        if rhyme_type == "consonante":
+            return rima_consonante(last_word)
+        else:
+            return rima_asonante(last_word)
+    except Exception as e:
+        print(f"Error extracting rhyme from '{last_word}': {e}")
+        return ""
 
 
 def score_poem(text: str, structure: List[Dict]) -> float:
     """
-    Función simplificada de puntuación para evaluar poemas.
+    Función de puntuación para evaluar poemas.
     Mayor puntuación = mejor adherencia a la estructura.
     """
     if not text.strip():
@@ -60,7 +68,7 @@ def score_poem(text: str, structure: List[Dict]) -> float:
     score = 0.0
     stanzas = [s.strip() for s in text.strip().split("\n\n") if s.strip()]
 
-    # Bonus/penalización por número correcto de estrofas
+    # Penalización por número incorrecto de estrofas
     expected_stanzas = len(structure)
     score -= abs(len(stanzas) - expected_stanzas) * 2.0
 
@@ -73,7 +81,7 @@ def score_poem(text: str, structure: List[Dict]) -> float:
         expected_syllables = structure[i].get("syllables", [])
         expected_rhymes = structure[i].get("rhyme", [])
 
-        # Validar estructura
+        # Validar y filtrar estructuras
         if expected_syllables:
             expected_syllables = [s for s in expected_syllables
                                   if s is not None and isinstance(s, (int, float))]
@@ -95,15 +103,17 @@ def score_poem(text: str, structure: List[Dict]) -> float:
             # Evaluar sílabas
             if j < len(expected_syllables):
                 try:
-                    min_sil,max_sil = extract_syllable_count(line)
-                    expected_syl = expected_syllables[j]
-                    actual_syllables=-1
-                    if min_sil>expected_syl:
-                        actual_syllables=min_sil
-                    if max_sil<expected_syl:
-                        actual_syllables=max_sil
-                    if min_sil < expected_syl < max_sil:
-                        actual_syllables=expected_syllables
+                    min_sil, max_sil = extract_syllable_count(line)
+                    expected_syl = int(expected_syllables[j])
+
+                    # Lógica corregida para determinar sílabas reales
+                    if min_sil <= expected_syl <= max_sil:
+                        actual_syllables = expected_syl  # Perfecto
+                    elif expected_syl < min_sil:
+                        actual_syllables = min_sil  # Muy pocas sílabas esperadas
+                    else:  # expected_syl > max_sil
+                        actual_syllables = max_sil  # Demasiadas sílabas esperadas
+
                     syllable_diff = abs(actual_syllables - expected_syl)
 
                     if syllable_diff == 0:
@@ -112,7 +122,9 @@ def score_poem(text: str, structure: List[Dict]) -> float:
                         score += 0.5  # Pequeño bonus por estar cerca
                     else:
                         score -= syllable_diff * 0.5
-                except:
+
+                except Exception as e:
+                    print(f"Error evaluating syllables in line '{line}': {e}")
                     score -= 0.5
 
             # Recopilar rimas para evaluación posterior
@@ -120,20 +132,21 @@ def score_poem(text: str, structure: List[Dict]) -> float:
                 rhyme_label = expected_rhymes[j]
                 try:
                     rhyme_pattern = extract_rhyme_pattern(line, "asonante")
-                    if rhyme_label not in rhyme_groups:
-                        rhyme_groups[rhyme_label] = []
-                    rhyme_groups[rhyme_label].append(rhyme_pattern)
-                except:
-                    pass
+                    if rhyme_pattern:  # Solo agregar si hay patrón
+                        if rhyme_label not in rhyme_groups:
+                            rhyme_groups[rhyme_label] = []
+                        rhyme_groups[rhyme_label].append(rhyme_pattern)
+                except Exception as e:
+                    print(f"Error processing rhyme in line '{line}': {e}")
 
         # Evaluar consistencia de rimas
         for rhyme_label, patterns in rhyme_groups.items():
             if len(patterns) <= 1:
                 continue
             unique_patterns = set(p for p in patterns if p)
-            if len(unique_patterns) == 1:
+            if len(unique_patterns) == 1 and unique_patterns:
                 score += len(patterns) * 1.0  # Bonus por rima consistente
-            else:
+            elif len(unique_patterns) > 1:
                 score -= (len(unique_patterns) - 1) * 0.5
 
     return float(score)
@@ -154,53 +167,186 @@ def generate_candidates(
 ) -> List[str]:
     """Generar múltiples candidatos para un prompt"""
 
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    try:
+        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
-    candidates = []
-    for i in range(num_candidates):
-        torch.manual_seed(random.randint(0, 100000))
+        candidates = []
+        for i in range(num_candidates):
+            # Usar seed diferente para cada candidato
+            torch.manual_seed(random.randint(0, 100000))
 
-        outputs = model.generate(
-            **inputs,
-            do_sample=True,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            repetition_penalty=1.2,
-            pad_token_id=tokenizer.pad_token_id,
-        )
+            with torch.no_grad():  # Optimización de memoria
+                outputs = model.generate(
+                    **inputs,
+                    do_sample=True,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=1.2,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
 
-        generated_text = tokenizer.decode(
-            outputs[0][inputs["input_ids"].shape[1]:],
-            skip_special_tokens=True
-        ).strip()
+            generated_text = tokenizer.decode(
+                outputs[0][inputs["input_ids"].shape[1]:],
+                skip_special_tokens=True
+            ).strip()
 
-        candidates.append(generated_text)
+            candidates.append(generated_text)
 
-    return candidates
+        return candidates
+
+    except Exception as e:
+        print(f"Error generating candidates: {e}")
+        return []
 
 
-def create_preference_dataset(
+def create_preference_dataset_with_model(
         dataset: Dataset,
-        model_name: str,
+        model,
+        tokenizer,
         num_candidates: int = 4,
-        sample_size: int = None
+        sample_size: Optional[int] = None
 ) -> Dataset:
     """
-    Crear dataset de preferencias generando y evaluando candidatos.
-    Genera múltiples candidatos y selecciona el mejor/peor para mayor señal de aprendizaje.
+    Crear dataset de preferencias usando modelo ya cargado.
     """
+    print(f"Creating preference dataset with {len(dataset)} examples")
+
+    # Limitar tamaño del dataset si se especifica
+    if sample_size:
+        dataset = dataset.shuffle(seed=42).select(range(min(sample_size, len(dataset))))
+        print(f"Limited to {len(dataset)} examples")
+
+    preference_data = []
+    successful_examples = 0
+
+    for idx, example in enumerate(dataset):
+        print(f"Processing example {idx + 1}/{len(dataset)}")
+
+        try:
+            # Obtener el prompt del usuario
+            conversations = example.get("conversations", {})
+            if "content" not in conversations or not conversations["content"]:
+                print(f"  Skipped: no content in conversations")
+                continue
+
+            user_prompt = conversations["content"][0]
+            structure = example.get("structure", [])
+
+            if not user_prompt.strip():
+                print(f"  Skipped: empty user prompt")
+                continue
+
+            # Crear prompt con formato de chat
+            messages = [{"role": "user", "content": user_prompt}]
+
+            try:
+                prompt = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+            except Exception as e:
+                print(f"  Error applying chat template: {e}")
+                # Fallback to simple format
+                prompt = f"User: {user_prompt}\nAssistant:"
+
+            # Generar múltiples candidatos
+            candidates = generate_candidates(
+                prompt, model, tokenizer,
+                num_candidates=num_candidates
+            )
+
+            if len(candidates) < 2:
+                print(f"  Skipped: insufficient candidates generated")
+                continue
+
+            # Evaluar cada candidato
+            scored_candidates = []
+            for candidate in candidates:
+                if candidate.strip():  # Solo evaluar candidatos no vacíos
+                    score = score_poem(candidate, structure)
+                    scored_candidates.append((score, candidate))
+
+            if len(scored_candidates) < 2:
+                print(f"  Skipped: insufficient valid candidates")
+                continue
+
+            # Ordenar por puntuación
+            scored_candidates.sort(key=lambda x: x[0], reverse=True)
+
+            # Seleccionar el mejor y el peor para máximo contraste
+            best_score, best_poem = scored_candidates[0]
+            worst_score, worst_poem = scored_candidates[-1]
+
+            # Solo agregar si hay diferencia significativa
+            score_diff = best_score - worst_score
+            if score_diff > 1.0:
+                preference_data.append({
+                    "prompt": prompt,
+                    "chosen": best_poem,
+                    "rejected": worst_poem,
+                    "score_diff": score_diff,
+                    "structure": structure,
+                    "best_score": best_score,
+                    "worst_score": worst_score
+                })
+
+                successful_examples += 1
+                print(f"  ✅ Score diff: {score_diff:.2f} (best: {best_score:.2f}, worst: {worst_score:.2f})")
+            else:
+                print(f"  ❌ Skipped: insufficient score difference ({score_diff:.2f})")
+
+        except Exception as e:
+            print(f"  ❌ Error processing example {idx}: {e}")
+            continue
+
+    print(f"\n📊 Created {len(preference_data)} preference pairs from {len(dataset)} examples")
+    print(f"📊 Success rate: {successful_examples}/{len(dataset)} ({100 * successful_examples / len(dataset):.1f}%)")
+
+    if not preference_data:
+        raise ValueError("No preference pairs were created. Check your data and scoring function.")
+
+    return Dataset.from_list(preference_data)
+
+
+# ==========================================
+# ENTRENAMIENTO DPO OPTIMIZADO
+# ==========================================
+
+def train_dpo_model(
+        base_model_name: str,
+        dataset_path: str,
+        output_dir: str = "galicia-dpo-model",
+        num_train_epochs: int = 2,
+        per_device_train_batch_size: int = 2,
+        learning_rate: float = 5e-7,
+        beta: float = 0.1,
+        max_samples: int = 1000,
+):
+    """
+    Entrenar modelo con DPO de forma optimizada (una sola carga del modelo).
+    """
+    print("=" * 60)
+    print("INICIANDO ENTRENAMIENTO DPO OPTIMIZADO")
+    print("=" * 60)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Cargar modelo y tokenizer para generación
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    # 1. Cargar modelo UNA SOLA VEZ
+    print("\n1. Cargando modelo base...")
     model = AutoModelForCausalLM.from_pretrained(
-        model_name,
+        base_model_name,
         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
         device_map="auto" if device == "cuda" else None,
+        trust_remote_code=True,
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model_name,
         trust_remote_code=True
     )
 
@@ -211,186 +357,97 @@ def create_preference_dataset(
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Limitar tamaño del dataset si se especifica
-    if sample_size:
-        dataset = dataset.shuffle(seed=42).select(range(min(sample_size, len(dataset))))
+    # 2. Cargar dataset
+    print("\n2. Cargando dataset...")
+    try:
+        raw_dataset = load_from_disk(dataset_path)
+        print(f"  Dataset loaded: {len(raw_dataset)} examples")
+    except Exception as e:
+        raise ValueError(f"Error loading dataset from {dataset_path}: {e}")
 
-    preference_data = []
-
-    for idx, example in enumerate(dataset):
-        print(f"Processing example {idx + 1}/{len(dataset)}")
-
-        try:
-            # Obtener el prompt del usuario
-            user_prompt = example["conversations"]["content"][0]
-            structure = example.get("structure", [])
-
-            # Crear prompt con formato de chat
-            messages = [{"role": "user", "content": user_prompt}]
-            prompt = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-
-            # Generar múltiples candidatos
-            candidates = generate_candidates(
-                prompt, model, tokenizer,
-                num_candidates=num_candidates
-            )
-
-            # Evaluar cada candidato
-            scored_candidates = []
-            for candidate in candidates:
-                score = score_poem(candidate, structure)
-                scored_candidates.append((score, candidate))
-
-            # Ordenar por puntuación
-            scored_candidates.sort(key=lambda x: x[0], reverse=True)
-
-            # Seleccionar el mejor y el peor para máximo contraste
-            best_score, best_poem = scored_candidates[0]
-            worst_score, worst_poem = scored_candidates[-1]
-
-            # Solo agregar si hay diferencia significativa
-            if best_score - worst_score > 1.0:
-                preference_data.append({
-                    "prompt": prompt,
-                    "chosen": best_poem,
-                    "rejected": worst_poem,
-                    "score_diff": best_score - worst_score,
-                    "structure": structure
-                })
-
-                print(f"  Score diff: {best_score - worst_score:.2f}")
-            else:
-                print(f"  Skipped: insufficient score difference")
-
-        except Exception as e:
-            print(f"  Error: {e}")
-            continue
-
-    print(f"Created {len(preference_data)} preference pairs from {len(dataset)} examples")
-
-    return Dataset.from_list(preference_data)
-
-
-# ==========================================
-# ENTRENAMIENTO DPO
-# ==========================================
-
-def train_dpo_model(
-        base_model_name: str,
-        dataset_path: str,
-        output_dir: str = "galicia-dpo-model",
-        num_train_epochs: int = 2,
-        per_device_train_batch_size: int = 2,
-        learning_rate: float = 5e-7,
-        beta: float = 0.1,  # Parámetro DPO que controla cuánto desviarse del modelo de referencia
-        max_samples: int = 1000,  # Limitar samples para pruebas
-):
-    """
-    Entrenar modelo con DPO para seguir estructuras métricas.
-
-    DPO es más eficiente que PPO porque:
-    - No necesita un reward model separado
-    - Es más estable en el entrenamiento
-    - Requiere menos memoria
-    - Converge más rápido
-    """
-
-    print("=" * 60)
-    print("INICIANDO ENTRENAMIENTO DPO")
-    print("=" * 60)
-
-    # Cargar dataset
-    print("\n1. Cargando dataset...")
-    raw_dataset = load_from_disk(dataset_path)
-
-    # Crear dataset de preferencias
-    print("\n2. Creando dataset de preferencias...")
-    pref_dataset = create_preference_dataset(
+    # 3. Crear dataset de preferencias usando el mismo modelo
+    print("\n3. Creando dataset de preferencias...")
+    pref_dataset = create_preference_dataset_with_model(
         raw_dataset,
-        base_model_name,
-        num_candidates=4,  # Generar 4 candidatos por ejemplo
+        model,
+        tokenizer,
+        num_candidates=4,
         sample_size=max_samples
     )
 
-    # Dividir en train/eval
-    print("\n3. Dividiendo dataset...")
-    split = pref_dataset.train_test_split(test_size=0.1, seed=42)
+    if len(pref_dataset) == 0:
+        raise ValueError("No preference pairs created. Cannot proceed with training.")
+
+    # 4. Dividir en train/eval
+    print("\n4. Dividiendo dataset...")
+    split = pref_dataset.train_test_split(test_size=0.1, seed=42, shuffle=True)
     train_dataset = split["train"]
     eval_dataset = split["test"]
 
     print(f"  Train: {len(train_dataset)} ejemplos")
     print(f"  Eval: {len(eval_dataset)} ejemplos")
 
-    # Cargar modelo y tokenizer
-    print("\n4. Cargando modelo base...")
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model_name,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto" if torch.cuda.is_available() else None,
-        trust_remote_code=True,
-    )
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        base_model_name,
-        trust_remote_code=True
-    )
-
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-
-    # Configurar argumentos de entrenamiento DPO
+    # 5. Configurar argumentos de entrenamiento DPO
     print("\n5. Configurando entrenamiento...")
     training_args = DPOConfig(
         output_dir=output_dir,
         num_train_epochs=num_train_epochs,
         per_device_train_batch_size=per_device_train_batch_size,
         per_device_eval_batch_size=per_device_train_batch_size,
-        gradient_accumulation_steps=4,  # Para simular batch más grande
-        gradient_checkpointing=True,  # Ahorrar memoria
+        gradient_accumulation_steps=4,
+        gradient_checkpointing=True,
         learning_rate=learning_rate,
-        beta=beta,  # Parámetro específico de DPO
+        beta=beta,
         warmup_steps=100,
         logging_steps=10,
         eval_strategy="steps",
         eval_steps=50,
         save_strategy="steps",
         save_steps=100,
-        bf16=torch.cuda.is_available(),  # Usar bf16 si hay GPU
-        report_to="none",  # Cambiar a "wandb" si quieres logging
+        bf16=device == "cuda",
+        fp16=False,  # No usar ambos
+        report_to="none",
         remove_unused_columns=False,
         max_length=512,
         max_prompt_length=256,
+        dataloader_pin_memory=False,  # Optimización de memoria
+        dataloader_num_workers=0,  # Evitar problemas de multiprocessing
+        save_total_limit=2,  # Limitar checkpoints guardados
     )
 
-    # Crear trainer DPO
+    # 6. Crear trainer DPO
     print("\n6. Creando DPO Trainer...")
     trainer = DPOTrainer(
         model=model,
+        ref_model=None,  # Permite optimizaciones internas
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        processing_class=tokenizer,  # Cambiado de 'tokenizer' a 'processing_class'
-        # El modelo de referencia se crea automáticamente como una copia del modelo inicial
+        processing_class=tokenizer,
     )
 
-    # Entrenar
+    # 7. Entrenar
     print("\n7. Iniciando entrenamiento...")
     print("=" * 60)
-    trainer.train()
 
-    # Guardar modelo final
+    try:
+        trainer.train()
+    except Exception as e:
+        print(f"Error during training: {e}")
+        raise
+
+    # 8. Guardar modelo final
     print("\n8. Guardando modelo...")
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
 
-    # Mostrar métricas finales
+    # 9. Mostrar métricas finales
     print("\n9. Evaluación final...")
-    metrics = trainer.evaluate()
-    print(f"Métricas finales: {metrics}")
+    try:
+        metrics = trainer.evaluate()
+        print(f"Métricas finales: {metrics}")
+    except Exception as e:
+        print(f"Error in final evaluation: {e}")
 
     print("\n" + "=" * 60)
     print(f"ENTRENAMIENTO COMPLETADO")
@@ -401,7 +458,7 @@ def train_dpo_model(
 
 
 # ==========================================
-# FUNCIÓN DE INFERENCIA PARA PROBAR
+# FUNCIÓN DE INFERENCIA MEJORADA
 # ==========================================
 
 def generate_poem_with_structure(
@@ -410,59 +467,69 @@ def generate_poem_with_structure(
         structure: List[Dict],
         temperature: float = 0.7,
         max_new_tokens: int = 150
-) -> str:
+) -> Tuple[str, float]:
     """
     Generar un poema usando el modelo entrenado con DPO.
+    Returns: (generated_poem, score)
     """
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Cargar modelo entrenado
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-        device_map="auto" if device == "cuda" else None,
-        trust_remote_code=True,
-    )
+    try:
+        # Cargar modelo entrenado
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map="auto" if device == "cuda" else None,
+            trust_remote_code=True,
+        )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-    # Crear prompt con formato de chat
-    messages = [{"role": "user", "content": prompt}]
-    formatted_prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
+        # Crear prompt con formato de chat
+        messages = [{"role": "user", "content": prompt}]
 
-    # Generar
-    inputs = tokenizer(formatted_prompt, return_tensors="pt", truncation=True)
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        try:
+            formatted_prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+        except:
+            formatted_prompt = f"User: {prompt}\nAssistant:"
 
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        do_sample=True,
-        top_p=0.95,
-        repetition_penalty=1.2,
-        pad_token_id=tokenizer.pad_token_id,
-    )
+        # Generar
+        inputs = tokenizer(formatted_prompt, return_tensors="pt", truncation=True)
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
-    generated_text = tokenizer.decode(
-        outputs[0][inputs["input_ids"].shape[1]:],
-        skip_special_tokens=True
-    ).strip()
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=True,
+                top_p=0.95,
+                repetition_penalty=1.2,
+                pad_token_id=tokenizer.pad_token_id,
+            )
 
-    # Evaluar el poema generado
-    score = score_poem(generated_text, structure)
+        generated_text = tokenizer.decode(
+            outputs[0][inputs["input_ids"].shape[1]:],
+            skip_special_tokens=True
+        ).strip()
 
-    print(f"Poema generado (puntuación: {score:.2f}):")
-    print("-" * 40)
-    print(generated_text)
-    print("-" * 40)
+        # Evaluar el poema generado
+        score = score_poem(generated_text, structure)
 
-    return generated_text
+        print(f"Poema generado (puntuación: {score:.2f}):")
+        print("-" * 40)
+        print(generated_text)
+        print("-" * 40)
+
+        return generated_text, score
+
+    except Exception as e:
+        print(f"Error generating poem: {e}")
+        return "", -999.0
 
 
 # ==========================================
@@ -471,18 +538,25 @@ def generate_poem_with_structure(
 
 if __name__ == "__main__":
     # Configuración
-    BASE_MODEL = "galicIA-full-FIM"  # Tu modelo base
-    DATASET_PATH = "poemas_GalicIA_est"  # Tu dataset con estructuras
-    OUTPUT_DIR = "galicia-dpo-structured"  # Donde guardar el modelo entrenado
+    BASE_MODEL = "galicIA-full-FIM"
+    DATASET_PATH = "poemas_GalicIA_est"
+    OUTPUT_DIR = "galicia-dpo-structured"
 
-    # Entrenar modelo con DPO
-    trainer = train_dpo_model(
-        base_model_name=BASE_MODEL,
-        dataset_path=DATASET_PATH,
-        output_dir=OUTPUT_DIR,
-        num_train_epochs=2,
-        per_device_train_batch_size=2,
-        learning_rate=5e-7,
-        beta=0.1,  # Controla cuánto puede desviarse del modelo original
-        max_samples=2,  # Usar 500 ejemplos para entrenamiento rápido
-    )
+    try:
+        # Entrenar modelo con DPO
+        trainer = train_dpo_model(
+            base_model_name=BASE_MODEL,
+            dataset_path=DATASET_PATH,
+            output_dir=OUTPUT_DIR,
+            num_train_epochs=2,
+            per_device_train_batch_size=2,
+            learning_rate=5e-7,
+            beta=0.1,
+            max_samples=2,  # Reducido para pruebas
+        )
+
+        print("✅ Entrenamiento completado exitosamente!")
+
+    except Exception as e:
+        print(f"❌ Error en el entrenamiento: {e}")
+        raise
