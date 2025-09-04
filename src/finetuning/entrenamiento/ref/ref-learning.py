@@ -6,6 +6,8 @@ from datasets import load_from_disk, Dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
+    LogitsProcessor,
+    LogitsProcessorList,
 )
 from trl import (
     DPOTrainer,
@@ -15,6 +17,42 @@ from trl import (
 
 # Importar las funciones de evaluación métrica
 from src.extractor_métrica.procesar_poema import rango_silabas, rima_consonante, rima_asonante
+
+
+# ==========================================
+# UTILIDADES
+# ==========================================
+
+def pick_dtype():
+    """Elige dtype estable según la GPU."""
+    if torch.cuda.is_available():
+        if torch.cuda.is_bf16_supported():
+            return torch.bfloat16
+        return torch.float16
+    return torch.float32bit
+
+
+
+class NanInfGuard(LogitsProcessor):
+    """Protege los logits de NaN/Inf y desbordes absurdos."""
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        scores = torch.nan_to_num(scores, nan=-1e4, posinf=1e4, neginf=-1e4)
+        return scores.clamp(min=-1e4, max=1e4)
+
+
+def ensure_tokens(tokenizer):
+    """Asegura pad/eos token ids válidos."""
+    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    if tokenizer.eos_token_id is None and tokenizer.pad_token_id is not None:
+        tokenizer.eos_token_id = tokenizer.pad_token_id
+    # Si faltan ambos, crea un token especial de pad
+    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is None:
+        if "<pad>" not in tokenizer.get_vocab():
+            tokenizer.add_special_tokens({"pad_token": "<pad>"})
+        tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids("<pad>")
+        if tokenizer.eos_token_id is None:
+            tokenizer.eos_token_id = tokenizer.pad_token_id
 
 
 # ==========================================
@@ -106,7 +144,7 @@ def score_poem(text: str, structure: List[Dict]) -> float:
                     min_sil, max_sil = extract_syllable_count(line)
                     expected_syl = int(expected_syllables[j])
 
-                    # Lógica corregida para determinar sílabas reales
+                    # Lógica para determinar sílabas reales
                     if min_sil <= expected_syl <= max_sil:
                         actual_syllables = expected_syl  # Perfecto
                     elif expected_syl < min_sil:
@@ -163,30 +201,51 @@ def generate_candidates(
         num_candidates: int = 4,
         max_new_tokens: int = 150,
         temperature: float = 0.9,
-        top_p: float = 0.95
+        top_p: float = 0.95,
+        top_k: int = 50,
 ) -> List[str]:
-    """Generar múltiples candidatos para un prompt"""
-
+    """Generar múltiples candidatos para un prompt con guardas de estabilidad."""
     try:
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
         candidates = []
-        for i in range(num_candidates):
+        logits_processors = LogitsProcessorList([NanInfGuard()])
+
+        for _ in range(num_candidates):
             # Usar seed diferente para cada candidato
             torch.manual_seed(random.randint(0, 100000))
 
-            with torch.no_grad():  # Optimización de memoria
-                outputs = model.generate(
-                    **inputs,
-                    do_sample=True,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    repetition_penalty=1.2,
-                    pad_token_id=tokenizer.pad_token_id,
-                    eos_token_id=tokenizer.eos_token_id,
-                )
+            # Parámetros robustos
+            gen_kwargs = dict(
+                **inputs,
+                do_sample=True,
+                max_new_tokens=max_new_tokens,
+                temperature=max(temperature, 1e-5),
+                top_p=min(max(top_p, 1e-6), 0.9999),
+                top_k=max(int(top_k), 0),
+                repetition_penalty=1.1,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                logits_processor=logits_processors,
+                renormalize_logits=True,
+                use_cache=True,
+            )
+
+            with torch.no_grad():
+                try:
+                    outputs = model.generate(**gen_kwargs)
+                except RuntimeError as e:
+                    # Fallback determinista (greedy) si falló el muestreo
+                    print(f"[WARN] Sampling failed, falling back to greedy: {e}")
+                    outputs = model.generate(
+                        **inputs,
+                        do_sample=False,
+                        max_new_tokens=max_new_tokens,
+                        pad_token_id=tokenizer.pad_token_id,
+                        eos_token_id=tokenizer.eos_token_id,
+                        use_cache=True,
+                    )
 
             generated_text = tokenizer.decode(
                 outputs[0][inputs["input_ids"].shape[1]:],
@@ -250,7 +309,7 @@ def create_preference_dataset_with_model(
                 )
             except Exception as e:
                 print(f"  Error applying chat template: {e}")
-                # Fallback to simple format
+                # Fallback a formato simple
                 prompt = f"User: {user_prompt}\nAssistant:"
 
             # Generar múltiples candidatos
@@ -336,26 +395,38 @@ def train_dpo_model(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
+    # Estabilidad matmul en GPU
+    if torch.cuda.is_available():
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True
+        except Exception:
+            pass
+
     # 1. Cargar modelo UNA SOLA VEZ
     print("\n1. Cargando modelo base...")
+    dtype = pick_dtype()
     model = AutoModelForCausalLM.from_pretrained(
         base_model_name,
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-        device_map="auto" if device == "cuda" else None,
+        torch_dtype=dtype,
+        device_map="auto" if torch.cuda.is_available() else None,
         trust_remote_code=True,
     )
-
     tokenizer = AutoTokenizer.from_pretrained(
         base_model_name,
         trust_remote_code=True
     )
 
+    # Ajustes de tokenizer y modelo
+    ensure_tokens(tokenizer)
+    if hasattr(model, "resize_token_embeddings"):
+        # Por si se añadió un <pad> nuevo
+        model.resize_token_embeddings(len(tokenizer))
+
     # Configurar chat template si es necesario
-    if tokenizer.chat_template is None:
+    if getattr(tokenizer, "chat_template", None) is None:
         model, tokenizer = setup_chat_format(model, tokenizer)
 
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
+    model.eval()  # importante para estabilidad en generación
 
     # 2. Cargar dataset
     print("\n2. Cargando dataset...")
@@ -389,6 +460,7 @@ def train_dpo_model(
 
     # 5. Configurar argumentos de entrenamiento DPO
     print("\n5. Configurando entrenamiento...")
+    bf16_ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     training_args = DPOConfig(
         output_dir=output_dir,
         num_train_epochs=num_train_epochs,
@@ -400,19 +472,19 @@ def train_dpo_model(
         beta=beta,
         warmup_steps=100,
         logging_steps=10,
-        eval_strategy="steps",
+        eval_strategy="steps",           # deja igual que tu script original
         eval_steps=50,
         save_strategy="steps",
         save_steps=100,
-        bf16=device == "cuda",
-        fp16=False,  # No usar ambos
+        bf16=bf16_ok,                    # solo si está soportado
+        fp16=(torch.cuda.is_available() and not bf16_ok),
         report_to="none",
         remove_unused_columns=False,
         max_length=512,
         max_prompt_length=256,
-        dataloader_pin_memory=False,  # Optimización de memoria
-        dataloader_num_workers=0,  # Evitar problemas de multiprocessing
-        save_total_limit=2,  # Limitar checkpoints guardados
+        dataloader_pin_memory=False,     # Optimización de memoria
+        dataloader_num_workers=0,        # Evitar problemas de multiprocessing
+        save_total_limit=2,              # Limitar checkpoints guardados
     )
 
     # 6. Crear trainer DPO
@@ -476,14 +548,19 @@ def generate_poem_with_structure(
 
     try:
         # Cargar modelo entrenado
+        dtype = pick_dtype()
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            torch_dtype=dtype,
             device_map="auto" if device == "cuda" else None,
             trust_remote_code=True,
         )
 
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        ensure_tokens(tokenizer)
+        if hasattr(model, "resize_token_embeddings"):
+            model.resize_token_embeddings(len(tokenizer))
+        model.eval()
 
         # Crear prompt con formato de chat
         messages = [{"role": "user", "content": prompt}]
@@ -494,23 +571,41 @@ def generate_poem_with_structure(
                 tokenize=False,
                 add_generation_prompt=True
             )
-        except:
+        except Exception:
             formatted_prompt = f"User: {prompt}\nAssistant:"
 
         # Generar
-        inputs = tokenizer(formatted_prompt, return_tensors="pt", truncation=True)
+        inputs = tokenizer(formatted_prompt, return_tensors="pt", truncation=True, max_length=512)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
+        logits_processors = LogitsProcessorList([NanInfGuard()])
+
         with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                do_sample=True,
-                top_p=0.95,
-                repetition_penalty=1.2,
-                pad_token_id=tokenizer.pad_token_id,
-            )
+            try:
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=max(temperature, 1e-5),
+                    do_sample=True,
+                    top_p=0.95,
+                    top_k=50,
+                    repetition_penalty=1.1,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    logits_processor=logits_processors,
+                    renormalize_logits=True,
+                    use_cache=True,
+                )
+            except RuntimeError as e:
+                print(f"[WARN] Sampling failed in inference, falling back to greedy: {e}")
+                outputs = model.generate(
+                    **inputs,
+                    do_sample=False,
+                    max_new_tokens=max_new_tokens,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    use_cache=True,
+                )
 
         generated_text = tokenizer.decode(
             outputs[0][inputs["input_ids"].shape[1]:],
@@ -552,7 +647,7 @@ if __name__ == "__main__":
             per_device_train_batch_size=2,
             learning_rate=5e-7,
             beta=0.1,
-            max_samples=2,  # Reducido para pruebas
+            max_samples=400,  # Reducido para pruebas
         )
 
         print("✅ Entrenamiento completado exitosamente!")

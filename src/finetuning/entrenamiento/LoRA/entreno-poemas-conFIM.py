@@ -27,17 +27,20 @@ def inspeccionar_adapters(model):
     return adapters
 
 # 1) Cargar y preprocesar dataset
-raw_ds = load_from_disk("poemas_GalicIA_norima")
+raw_ds = load_from_disk("poemas_GalicIA_modernos")
 print(raw_ds)
 
 # 2) Cargar modelo y tokenizer (base)
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Qwen3-1.7B",
+    model_name="unsloth/qwen3-0.6b",
     max_seq_length=512,
     load_in_4bit=False,
     load_in_8bit=False,
     full_finetuning=False,
 )
+
+from unsloth.chat_templates import get_chat_template
+#tokenizer = get_chat_template(tokenizer, chat_template="gemma3")
 
 # === FIM: añadir tokens si faltan y ajustar embeddings ===
 FIM_TOKENS = ["<|fim_prefix|>", "<|fim_suffix|>", "<|fim_middle|>"]
@@ -109,12 +112,12 @@ from peft import PeftModel, LoraConfig, get_peft_model
 # 5a) Cargar LoRA de idioma (congelado)
 model = PeftModel.from_pretrained(
     model,
-    "galicIA-base",
+    "pajon1/galicIA-base",
     adapter_name="lang",
     is_trainable=False,   # lang congelado
 )
 model = model.merge_and_unload()
-r_config=80
+r_config=200
 
 # 5c) Añadir LoRA de tarea NUEVO (entrenable) sobre el base ya fusionado
 task_cfg = LoraConfig(

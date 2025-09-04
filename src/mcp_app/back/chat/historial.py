@@ -4,7 +4,9 @@ import configparser
 import os
 
 config = configparser.ConfigParser()
-config.read('config.ini')
+current_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(current_dir, '..', '..', 'config.ini')
+config.read(config_path)
 base_dir = config["paths"]["base_dir"]
 llm_model = config["model"]["llm_token"]
 llm_subdir = llm_model.replace("/", "_")

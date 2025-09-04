@@ -3,7 +3,7 @@ import configparser
 import json
 from openai import OpenAI
 from openai.types.chat.completion_create_params import Function
-
+import os
 from src.mcp_app.back.chat.historial import get_history, save_message
 from src.mcp_app.services.tools.tools import generar_poema as generar_poema_service
 
@@ -44,8 +44,9 @@ def recortar_despues_de_think(texto):
     return texto
 
 def query_llm(query_text: str, conversation_id: str) -> str:
-
-    config.read('config.ini')
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(current_dir, '..', '..', 'config.ini')
+    config.read(config_path)
     model = config['model']['llm_tool']
     url = config['model']['url']
     key = config['model']['key']

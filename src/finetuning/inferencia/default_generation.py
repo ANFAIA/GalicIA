@@ -1,114 +1,204 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer, StoppingCriteria, \
+    StoppingCriteriaList
+import torch
 import threading
+import re
 
-# ------------------------------
-# Carga de modelo y tokenizer
-# ------------------------------
-def load_model_and_tokenizer(checkpoint: str):
-    """
-    Carga y devuelve (tokenizer, model).
-    """
-    tokenizer = AutoTokenizer.from_pretrained(checkpoint)
-    model = AutoModelForCausalLM.from_pretrained(checkpoint)
-    return tokenizer, model
-checkpoint = "galicIA-full-FIM"
-tokenizer, model = load_model_and_tokenizer(checkpoint)
-# ------------------------------
-# Helper: preparar los inputs
-# ------------------------------
-def _prepare_inputs(tokenizer, messages):
-    """
-    Aplica el template de chat tal y como lo hacías.
-    Devuelve los input_ids listos para generate().
-    """
-    inputs = tokenizer.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_tensors="pt",
-        enable_thinking=False,   # lo mantengo igual que en tu código
-    )
-    return inputs
+# === Carga del modelo ===
+ckpt = "pajon1/galicIA-v1"
+tok = AutoTokenizer.from_pretrained(ckpt, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(
+    ckpt, torch_dtype="auto", device_map="auto", trust_remote_code=True
+)
 
-# ------------------------------
-# 1) Streaming por stdout (no devuelve nada)
-# ------------------------------
+# Asegurar que el tokenizer tiene pad_token
+if tok.pad_token is None:
+    tok.pad_token = tok.eos_token
+
+
+def _eos_ids():
+    ids = []
+    if tok.eos_token_id is not None:
+        ids.append(tok.eos_token_id)
+
+    # Tokens especiales comunes
+    special_tokens = ["<|im_end|>", "</s>", "<|endoftext|>"]
+    for token in special_tokens:
+        try:
+            token_id = tok.convert_tokens_to_ids(token)
+            if token_id is not None and token_id != tok.unk_token_id and token_id not in ids:
+                ids.append(token_id)
+        except:
+            pass
+
+    return ids if ids else [tok.eos_token_id]
+
+
+def _prepare_inputs(messages, force_continue_after_think=True):
+    # Aplicar chat template normal
+    prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,enable_thinking=False)
+
+    # SOLUCIÓN: Si queremos forzar al modelo a continuar después de <think>
+    if force_continue_after_think:
+        # Opción 1: Agregar contenido después del prompt para "empujar" la generación
+        prompt = prompt + "\n<think>\n"  # Iniciamos el tag think nosotros
+        print(f"[DEBUG] Prompt modificado: {prompt[:300]}...")
+    else:
+        print(f"[DEBUG] Prompt original: {prompt[:300]}...")
+
+    # Tokenizar
+    inputs = tok(prompt, return_tensors="pt", padding=True, truncation=True, max_length=512)
+
+    # Mover a dispositivo
+    return {k: v.to(model.device) for k, v in inputs.items()}
+
+
+# Stopping criteria personalizado que NO para en </think>
+class SelectiveStoppingCriteria(StoppingCriteria):
+    def __init__(self, tokenizer, keywords_to_stop):
+        self.tokenizer = tokenizer
+        self.keywords = keywords_to_stop
+        self.key_ids = []
+        for k in keywords_to_stop:
+            tokens = tokenizer(k, add_special_tokens=False, return_tensors="pt")["input_ids"][0]
+            if len(tokens) > 0:
+                self.key_ids.append(tokens)
+
+    def __call__(self, input_ids, scores, **kwargs):
+        # Solo parar en keywords específicos, NO en </think>
+        for kid in self.key_ids:
+            if len(kid) <= input_ids.shape[1]:
+                if torch.equal(input_ids[0, -len(kid):].cpu(), kid):
+                    return True
+        return False
+
+
+def clean_output(text):
+    """Limpia el output removiendo tags de think si es necesario"""
+    # Remover tags <think> y </think> vacíos
+    text = re.sub(r'<think>\s*</think>', '', text)
+    # Si hay contenido dentro de think, extraerlo
+    text = re.sub(r'<think>(.*?)</think>', r'\1', text, flags=re.DOTALL)
+    return text.strip()
+
+
 def stream_chat_to_stdout(messages,
-                          max_new_tokens=150,
-                          repetition_penalty=1.6,
-                          **generate_kwargs):
-    """
-    Genera texto en tiempo real e imprime por pantalla (stdout).
-    No retorna nada.
-    """
-    inputs = _prepare_inputs(tokenizer, messages)
+                          max_new_tokens=500,  # Aumentado para dar más espacio
+                          temperature=0.7,
+                          top_p=0.9,
+                          repetition_penalty=1.1,
+                          no_repeat_ngram_size=3,
+                          force_continue=True):
+    print("\n=== Iniciando generación ===")
+    inputs = _prepare_inputs(messages, force_continue_after_think=force_continue)
+    eos_ids = _eos_ids()
+    print(f"[DEBUG] EOS IDs: {eos_ids}")
+    print(f"[DEBUG] Input shape: {inputs['input_ids'].shape}")
 
-    streamer = TextIteratorStreamer(
-        tokenizer,
-        skip_prompt=True,
-        skip_special_tokens=True
-    )
+    # Solo parar en errores reales, no en </think>
+    stop_keywords = ["Traceback", "Error:", "RuntimeError", "ValueError"]
+    stops = StoppingCriteriaList([SelectiveStoppingCriteria(tok, stop_keywords)])
+
+    streamer = TextIteratorStreamer(tok, skip_prompt=True, skip_special_tokens=False)
+
+    generated_text = []
 
     def _worker():
-        model.generate(
-            input_ids=inputs,
-            max_new_tokens=max_new_tokens,
-            repetition_penalty=repetition_penalty,
-            streamer=streamer,
-            **generate_kwargs
-        )
+        with torch.inference_mode():
+            output = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                min_new_tokens=50,  # Forzar generación mínima
+                do_sample=True,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=50,
+                repetition_penalty=repetition_penalty,
+                no_repeat_ngram_size=no_repeat_ngram_size,
+                eos_token_id=eos_ids,
+                pad_token_id=tok.pad_token_id,
+                stopping_criteria=stops,
+                streamer=streamer,
+                length_penalty=1.0,  # No penalizar longitud
+            )
 
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
 
+    print("\nRespuesta del modelo (raw):\n")
     for token in streamer:
         print(token, end="", flush=True)
+        generated_text.append(token)
 
-    thread.join()
-    # Opcional: salto de línea final
-    print()
+    t.join()
 
-# ------------------------------
-# 2) Generación que devuelve el texto completo al final
-# ------------------------------
-def generate_chat_text(messages,
-                       max_new_tokens=150,
-                       repetition_penalty=1.6,
-                       **generate_kwargs) -> str:
-    """
-    Genera el texto completo y lo devuelve como string (sin imprimir).
-    """
-    inputs = _prepare_inputs(tokenizer, messages)
+    # Limpiar y mostrar output procesado
+    full_text = "".join(generated_text)
+    cleaned_text = clean_output(full_text)
 
-    output_ids = model.generate(
-        input_ids=inputs,
-        max_new_tokens=max_new_tokens,
-        repetition_penalty=repetition_penalty,
-        **generate_kwargs
-    )
+    print("\n\n=== Respuesta limpia ===")
+    print(cleaned_text)
+    print("\n=== Generación completada ===\n")
+    return cleaned_text
 
-    # Decodificar sólo lo nuevo (sin el prompt)
-    generated_ids = output_ids[0, inputs.shape[-1]:]
-    text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-    return text
 
-# ------------------------------
-# Ejemplo de uso
-# ------------------------------
+# === SOLUCIÓN ALTERNATIVA: Bypass directo ===
+def generate_direct(prompt_text, max_new_tokens=300):
+    """Generación directa sin chat template"""
+    print(f"\n=== Generación directa ===")
+    print(f"Prompt: {prompt_text}")
+
+    inputs = tok(prompt_text, return_tensors="pt", padding=True, truncation=True)
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            min_new_tokens=30,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.9,
+            repetition_penalty=1.1,
+            pad_token_id=tok.pad_token_id,
+            eos_token_id=tok.eos_token_id,
+        )
+
+    response = tok.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+    cleaned = clean_output(response)
+    print(f"\nRespuesta: {cleaned}\n")
+    return cleaned
+
+
+# === PRUEBAS ===
 if __name__ == "__main__":
-    # checkpoint = "Qwen/Qwen3-0.6B"
-    # checkpoint = "galicIA-base"
-
-
-
-
+    promt="¿?"
+    print("=" * 60)
+    print("PRUEBA 1: Con chat template modificado")
+    print("=" * 60)
     messages = [
-        {"role": "user", "content": "Faime un poema sobre a guerra"}
+        {"role": "user", "content": f"{promt}"}
+    ]
+    stream_chat_to_stdout(messages, force_continue=True)
+
+    print("\n" + "=" * 60)
+    print("PRUEBA 2: Generación directa sin template")
+    print("=" * 60)
+
+    # Probar diferentes formatos de prompt directo
+    prompts = [
+        # Formato 1: Simple
+        f"Usuario: {promt}\nAsistente:",
     ]
 
-    print("=== STREAMING (stdout) ===")
-    stream_chat_to_stdout(messages, max_new_tokens=150, repetition_penalty=1.6)
+    for i, prompt in enumerate(prompts, 1):
+        print(f"\n--- Formato {i} ---")
+        generate_direct(prompt, max_new_tokens=200)
 
-    #print("\n=== TEXTO COMPLETO (return) ===")
-    #full_text = generate_chat_text(messages, max_new_tokens=150, repetition_penalty=1.6)
-    #print(full_text)
+    print("\n" + "=" * 60)
+    print("PRUEBA 3: Pregunta simple")
+    print("=" * 60)
+    messages = [
+        {"role": "user", "content": f"{promt}"}
+    ]
+    stream_chat_to_stdout(messages, temperature=0.3)

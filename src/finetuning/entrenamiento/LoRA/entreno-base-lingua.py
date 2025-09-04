@@ -13,13 +13,15 @@ print(raw_ds)
 
 # 2) Cargar modelo y tokenizer
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Qwen3-1.7B",
+    model_name="unsloth/gemma-3-270m",
     max_seq_length=512,
     load_in_4bit=False,
     load_in_8bit=False,
     full_finetuning=False,
 )
-#tokenizer = get_chat_template(tokenizer, chat_template="unsloth")
+
+from unsloth.chat_templates import get_chat_template
+tokenizer = get_chat_template(tokenizer, chat_template="gemma3")
 
 # 3) Función de formateo genérica
 def formatting_prompts_func(examples):

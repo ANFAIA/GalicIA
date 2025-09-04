@@ -6,7 +6,7 @@ import threading
 from src.mcp_app.back.chat.historial import get_history, save_message
 
 config = configparser.ConfigParser()
-config.read('config.ini')
+config.read('src/config.ini')
 
 
 def recortar_despues_de_think(texto):
@@ -27,7 +27,17 @@ def init_agent_service():
         'max_tokens': 32768,
     }
 
-    system = ("""Eres un LLM que enruta a unha funcion que crea poemas en galego, o unico que debes facer é pasar o poema ao usuario final, non escribas nada mais en o poema devolto""")
+    system = ("""Eres un LLM que enruta a unha funcion que crea poemas en galego, o unico que debes facer é pasar o poema ao usuario final, non escribas nada mais en o poema devolto seperando os versos cunha linea e as estrofas con duas.
+    A estructura debe ser de este estilo
+    verso 1
+    verso 2
+    verso 3
+    
+    verso 4
+    verso 5
+    verso 6
+    """)
+
     tools = [{
         "mcpServers": {
             "rag_llm": {

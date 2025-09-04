@@ -3,10 +3,6 @@ import socket
 import threading
 import time
 from src.mcp_app.services.tools.tools import generar_poema as generar_poema_service
-import configparser
-
-config = configparser.ConfigParser()
-
 mcp = FastMCP("poema_mcp")
 
 @mcp.tool()

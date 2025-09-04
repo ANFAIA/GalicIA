@@ -12,7 +12,9 @@ torch.set_num_interop_threads(N_CORES)
 
 # Leer la configuración desde config.ini
 config = configparser.ConfigParser()
-config.read("config.ini")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(current_dir, '..', '..', 'config.ini')
+config.read(config_path)
 
 
 

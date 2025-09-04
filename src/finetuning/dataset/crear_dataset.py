@@ -197,7 +197,7 @@ for txt_path in ROOT_DIR.rglob("*.txt"):
     estrofa=extraer_primera_estrofa(parsed["text"])
     rima=analizar_estrofa(estrofa)
     # Claves y roles según lo que espera apply_chat_template
-    if parsed['period']=="Rexurdimento":
+    if True:#parsed['period']!="Trovadorismo" and parsed['period']!="Descoñecido":
         conv = [
             {"role": "user",      "content": get_promt(parsed['author'],parsed['period'],parsed["text"],rima)},
             {"role": "assistant", "content": completion}
@@ -213,5 +213,5 @@ features = Features({
 
 # 4) Crear y guardar el dataset
 dataset = Dataset.from_list(records, features=features)
-dataset.save_to_disk("poemas_GalicIA_rexurdimento")
+dataset.save_to_disk("poemas_GalicIA_modernos")
 print(dataset)
