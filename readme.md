@@ -8,21 +8,26 @@ GalicIA es un proyecto *open source* centrado en la creación de datasets y mode
 
 1. Crear el mayor dataset público de poesía gallega (texto y audio)  
 2. Desarrollar modelos de lenguaje especializados en gallego poético  
-3. Implementar herramientas de transcripción audio-texto  
-4. Preservar características únicas de la poesía gallega  
+3Preservar características únicas de la poesía gallega  
 
 ## Elementos del proyecto
 
 ```text
 ├── src/                            # Código fuente
+│   ├── mcp_app/                    # Lanza una pequeña interfaz que llama a la generación de poemas vias el sevidor MCP
+│   │   ├── app.py                  # Lanza la interfaz
+│   │   └── config.py               # Configura la app de la interfaz
 │   ├── finetuning/                 # Crea el LLM y hace la inferencia con una base de datos
 │   │   ├── dataset/                # Archivos para dataset de poemas
 │   │   │   └── crear_dataset.py    # genera datos sintéticos mediante prompts
 │   │   ├── entrenamiento/          # Entrena el modelo y adapta con LoRA
-│   │   │   └── LoRA/
-│   │   │       ├── entreno-base-lingua.py      # preentrena el modelo base en gallego
-│   │   │       ├── entreno-poemas.py           # fine-tuning poético con LoRA
-│   │   │       └── entreno-poemas-conFIM.py    # fine-tuning con Fill-In-the-Middle (FIM)
+│   │   │   ├── LoRA/
+│   │   │   │   ├── entreno-base-lingua.py      # preentrena el modelo base en gallego
+│   │   │   │   ├── entreno-poemas.py           # fine-tuning poético con LoRA
+│   │   │   │   └── entreno-poemas-conFIM.py    # fine-tuning con Fill-In-the-Middle (FIM)
+│   │   │   └──ref/
+│   │   │       └── ref-learning.py             # RL sobre un modelo en base a la script de procesar rimas
+│   │   │   
 │   │   └── inferencia/             # Generación de poemas
 │   │       ├── inferencia_estructura.py        # generación métrica (respeta sílabas y rimas)
 │   │       └── default_generation.py           # generación básica del modelo LLM
@@ -44,20 +49,22 @@ GalicIA es un proyecto *open source* centrado en la creación de datasets y mode
    pip install -r requirements.txt
    ```
 
-2. Configurar la clave de OpenAI (variable de entorno `OPENAI_API_KEY`).
+2. Configurar la clave de OpenAI (variable de entorno `OPENAI_API_KEY`) y  configurar config.ini para la app de la interfaz.
 
 3. Ejecutar cada script con Python:
 
-| Tarea                                              | Script                                                     | Comando                                                                       |
-|----------------------------------------------------|------------------------------------------------------------|-------------------------------------------------------------------------------|
-| Extracción de más de 1000 poemas                   | src/scrapping/llm_extract_poem.py                          | python src/scrapping/llm_extract_poem.py                                      |
-| Normalizar el texto de los poemas                  | src/scrapping/normalizacacion                              | Para cada script de la carpeta python src/scrapping/normalizacacion/script.py |
-| Creación de un modelo base preentrenado en gallego | src/finetuning/entrenamiento/LoRA/entreno-base-lingua.py   | python src/finetuning/entrenamiento/LoRA/entreno-base-lingua.py               |
-| Fine-tuning poético con LoRA                       | src/finetuning/entrenamiento/LoRA/entreno-poemas.py        | python src/finetuning/entrenamiento/LoRA/entreno-poemas.py                    |
-| Data augmentation con Fill-In-the-Middle (FIM)     | src/finetuning/entrenamiento/LoRA/entreno-poemas-conFIM.py | python src/finetuning/entrenamiento/LoRA/entreno-poemas-conFIM.py             |
-| Generación de datos sintéticos mediante prompts    | src/finetuning/dataset/crear_dataset.py                    | python src/finetuning/dataset/crear_dataset.py                                |
-| Generación de datos para RL                        | src/finetuning/dataset/crear_dataset_ref.py                | python src/finetuning/dataset/crear_dataset_fef.py                            |
-| Módulo de extracción silábica y rima               | src/extractor-métrica/procesar_poema.py                    | from src.extractor-métrica.procesar_poema import rango_silabas, rima_asonante |
-| Generación métrica que respeta sílabas y rima      | src/finetuning/inferencia/inferencia_estructura.py         | python src/finetuning/inferencia/inferencia_estructura.py                     |
-| Generación de poemas con un modelo LLM básico      | src/finetuning/inferencia/default_generation.py            | python src/finetuning/inferencia/default_generation.py                        |
+| Tarea                                                | Script                                                     | Comando                                                                       |
+|------------------------------------------------------|------------------------------------------------------------|-------------------------------------------------------------------------------|
+| Extracción de más de 1000 poemas                     | src/scrapping/llm_extract_poem.py                          | python src/scrapping/llm_extract_poem.py                                      |
+| Normalizar el texto de los poemas                    | src/scrapping/normalizacacion                              | Para cada script de la carpeta python src/scrapping/normalizacacion/script.py |
+| Creación de un modelo base preentrenado en gallego   | src/finetuning/entrenamiento/LoRA/entreno-base-lingua.py   | python src/finetuning/entrenamiento/LoRA/entreno-base-lingua.py               |
+| Fine-tuning poético con LoRA                         | src/finetuning/entrenamiento/LoRA/entreno-poemas.py        | python src/finetuning/entrenamiento/LoRA/entreno-poemas.py                    |
+| Data augmentation con Fill-In-the-Middle (FIM)       | src/finetuning/entrenamiento/LoRA/entreno-poemas-conFIM.py | python src/finetuning/entrenamiento/LoRA/entreno-poemas-conFIM.py             |
+| Generación de datos sintéticos mediante prompts      | src/finetuning/dataset/crear_dataset.py                    | python src/finetuning/dataset/crear_dataset.py                                |
+| Generación de datos para RL                          | src/finetuning/dataset/crear_dataset_ref.py                | python src/finetuning/dataset/crear_dataset_fef.py                            |
+| Módulo de extracción silábica y rima                 | src/extractor-métrica/procesar_poema.py                    | from src.extractor-métrica.procesar_poema import rango_silabas, rima_asonante |
+| Generación métrica que respeta sílabas y rima        | src/finetuning/inferencia/inferencia_estructura.py         | python src/finetuning/inferencia/inferencia_estructura.py                     |
+| Generación de poemas con un modelo LLM básico        | src/finetuning/inferencia/default_generation.py            | python src/finetuning/inferencia/default_generation.py                        |
+| Generación entreno de LLM con RL                     | src/finetuning/ref/ref-learning.py                         | python src/finetuning/ref/ref-learning.py                                     |
+| Utilizar frontend que llama a generar poemas via MCP | src/mcp_app/app.py                                         | streamlit run src/mcp_app/app.py en la carpeta galicIA base                   |
 

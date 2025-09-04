@@ -27,17 +27,20 @@ def inspeccionar_adapters(model):
     return adapters
 
 # 1) Cargar y preprocesar dataset
-raw_ds = load_from_disk("poemas_GalicIA_norima")
+raw_ds = load_from_disk("poemas_GalicIA_modernos")
 print(raw_ds)
 
 # 2) Cargar modelo y tokenizer (base)
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Qwen3-0.6B",
+    model_name="unsloth/qwen3-0.6b",
     max_seq_length=512,
     load_in_4bit=False,
     load_in_8bit=False,
     full_finetuning=False,
 )
+
+from unsloth.chat_templates import get_chat_template
+#tokenizer = get_chat_template(tokenizer, chat_template="gemma3")
 
 # === FIM: añadir tokens si faltan y ajustar embeddings ===
 FIM_TOKENS = ["<|fim_prefix|>", "<|fim_suffix|>", "<|fim_middle|>"]
@@ -55,6 +58,10 @@ def _first_assistant_text(conversations):
 # 3) Convertir a texto con prompt de generación (mezcla normal + FIM con cambios mínimos)
 def formatting_prompts_func(examples, fim_ratio: float = 0.3):
     out = []
+    if fim_ratio>1:
+        prev = formatting_prompts_func(examples, fim_ratio - 1)
+        out.extend(prev["text"])  # <--- aplanar en lugar de append
+        fim_ratio = 1.0  # última pasada completa (prob=1.0)
     for conv in examples["conversations"]:
         make_fim = random.random() < fim_ratio
         if make_fim:
@@ -105,16 +112,17 @@ from peft import PeftModel, LoraConfig, get_peft_model
 # 5a) Cargar LoRA de idioma (congelado)
 model = PeftModel.from_pretrained(
     model,
-    "galicIA-base",
+    "pajon1/galicIA-base",
     adapter_name="lang",
     is_trainable=False,   # lang congelado
 )
 model = model.merge_and_unload()
+r_config=200
 
 # 5c) Añadir LoRA de tarea NUEVO (entrenable) sobre el base ya fusionado
 task_cfg = LoraConfig(
-    r=250,
-    lora_alpha=500,
+    r=r_config,
+    lora_alpha=r_config*2,
     lora_dropout=0,
     target_modules=["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"],
     task_type="CAUSAL_LM",
